@@ -19,7 +19,6 @@ const TIER_OPTIONS = [
   "Jade","Immortal"
 ];
 
-
 // Hardcoded default collections (edit this list whenever you like)
 const DEFAULT_COLLECTIONS = [
   "Dayseal",
@@ -34,10 +33,13 @@ const customCollectionStore = localforage.createInstance({
   name: "pdf-card-binder-custom-collections"
 });
 
-
 // Types
 /** @typedef {{ id: string; name: string; pages: number; tags: string[]; collection?: string; thumbnailDataUrl: string; createdAt: number; updatedAt: number; tier?: string; favorite?: boolean; }} CardMeta */
 
+const DEBUG_DND = false;
+const d = (...args) => { if (DEBUG_DND) console.log("[DND]", ...args); };
+
+// ---------- Utilities ----------
 async function renderPdfPageToDataUrl(arrayBuffer, pageNumber = 1, scale = 0.9) {
   const pdf = await getDocument({ data: arrayBuffer }).promise;
   const page = await pdf.getPage(pageNumber);
@@ -52,10 +54,6 @@ async function renderPdfPageToDataUrl(arrayBuffer, pageNumber = 1, scale = 0.9) 
   return { dataUrl, numPages: pdf.numPages };
 }
 
-async function arrayBufferFromFile(file) {
-  return new Uint8Array(await file.arrayBuffer());
-}
-
 function useLocalMeta() {
   const [metas, setMetas] = useState(/** @type {CardMeta[]} */([]));
   const [loading, setLoading] = useState(true);
@@ -65,21 +63,20 @@ function useLocalMeta() {
       const keys = await metaStore.keys();
       const all = await Promise.all(keys.map((k) => metaStore.getItem(k)));
       const list = /** @type {CardMeta[]} */ (all.filter(Boolean));
-      list.sort((a, b) => a.createdAt - b.createdAt); // ← or remove this line to keep store order
+      list.sort((a, b) => a.createdAt - b.createdAt);
       setMetas(list);
       setLoading(false);
     })();
   }, []);
 
-
   async function upsert(meta) {
     await metaStore.setItem(meta.id, meta);
     setMetas((prev) => {
       const idx = prev.findIndex((m) => m.id === meta.id);
-      if (idx === -1) return [...prev, meta]; // append new card at the end
+      if (idx === -1) return [...prev, meta];
       const copy = prev.slice();
-      copy[idx] = meta;                        // replace in place
-      return copy;                             // ← no sort
+      copy[idx] = meta;
+      return copy;
     });
   }
 
@@ -119,7 +116,7 @@ function DropZone({ onFiles }) {
         const files = Array.from(e.dataTransfer.files).filter((f) => {
           const nameOk = f.name?.toLowerCase().endsWith(".pdf");
           const typeOk = (f.type || "").toLowerCase().includes("pdf");
-          return nameOk || typeOk; // IMPORTANT: type can be empty on Windows
+          return nameOk || typeOk; // type may be empty on Windows
         });
         if (files.length) onFiles(files);
       }}
@@ -135,14 +132,13 @@ function DropZone({ onFiles }) {
         className="hidden"
         onChange={(e) => {
           const files = Array.from(e.target.files ?? []);
-          if (files.length) onFiles(files);      // don't re-filter here
-          e.target.value = "";                   // allow picking same file twice
+          if (files.length) onFiles(files);
+          e.target.value = "";
         }}
       />
     </div>
   );
 }
-
 
 function Lightbox({ open, onClose, fileBytes, name }) {
   const [pageNum, setPageNum] = useState(1);
@@ -152,7 +148,7 @@ function Lightbox({ open, onClose, fileBytes, name }) {
   const canvasRef = useRef(null);
   const headerRef = useRef(null);
 
-  // Load/replace the PDF when opened or file changes
+  // Load or replace the PDF when opened or file changes
   useEffect(() => {
     if (!open || !fileBytes) return;
     let cancelled = false;
@@ -163,7 +159,7 @@ function Lightbox({ open, onClose, fileBytes, name }) {
         setPdf(p);
         setNumPages(p.numPages);
         setPageNum(1);
-        setScale("fit"); // start fitted every time
+        setScale("fit");
       } catch (e) {
         console.error("Failed to open PDF in lightbox", e);
       }
@@ -174,22 +170,19 @@ function Lightbox({ open, onClose, fileBytes, name }) {
     };
   }, [open, fileBytes]);
 
-  // Render helper (fits to viewport when scale === "fit")
   const render = React.useCallback(
     async (pageNo, targetScale) => {
       if (!pdf) return;
       const page = await pdf.getPage(pageNo);
-
-      // Base viewport to know natural page size
       const base = page.getViewport({ scale: 1 });
-
       let s = targetScale;
+
       if (s === "fit") {
         const hdrH = headerRef.current?.offsetHeight || 0;
-        const availW = window.innerWidth - 120;                  // side padding
-        const availH = window.innerHeight - hdrH - 120;          // top/bottom padding
-        s = Math.min(availW / base.width, availH / base.height); // contain
-        s = Math.max(0.1, Math.min(s, 8));                       // clamp
+        const availW = window.innerWidth - 120;
+        const availH = window.innerHeight - hdrH - 120;
+        s = Math.min(availW / base.width, availH / base.height);
+        s = Math.max(0.1, Math.min(s, 8));
       }
 
       const viewport = page.getViewport({ scale: s });
@@ -206,13 +199,11 @@ function Lightbox({ open, onClose, fileBytes, name }) {
     [pdf]
   );
 
-  // Render when pdf/page/scale changes
   useEffect(() => {
     if (!open || !pdf) return;
     render(pageNum, scale);
   }, [open, pdf, pageNum, scale, render]);
 
-  // Re-fit on window resize
   useEffect(() => {
     if (!open) return;
     const onResize = () => setScale("fit");
@@ -222,7 +213,6 @@ function Lightbox({ open, onClose, fileBytes, name }) {
 
   if (!open) return null;
 
-  // Zoom controls
   const zoomIn = () => setScale((s) => (s === "fit" ? 1.1 : Math.min(Number(s) * 1.1, 8)));
   const zoomOut = () => setScale((s) => (s === "fit" ? 0.9 : Math.max(Number(s) / 1.1, 0.1)));
   const set100 = () => setScale(1);
@@ -230,7 +220,6 @@ function Lightbox({ open, onClose, fileBytes, name }) {
 
   return (
     <div className="fixed inset-0 bg-black/70 z-50 flex flex-col" onClick={onClose}>
-      {/* Header */}
       <div
         ref={headerRef}
         className="px-4 pt-3 pb-2 flex items-center gap-3 text-white select-none"
@@ -248,12 +237,7 @@ function Lightbox({ open, onClose, fileBytes, name }) {
           <button className="px-3 py-1 rounded bg-white/10 hover:bg-white/20" onClick={onClose}>Close</button>
         </div>
       </div>
-
-      {/* Canvas area: centers the page; no scroll when fitted, scrolls only if zoomed in */}
-      <div
-        className="flex-1 flex items-center justify-center px-6 pb-6"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="flex-1 flex items-center justify-center px-6 pb-6" onClick={(e) => e.stopPropagation()}>
         <div className="shadow-2xl bg-white rounded">
           <canvas ref={canvasRef} />
         </div>
@@ -262,46 +246,65 @@ function Lightbox({ open, onClose, fileBytes, name }) {
   );
 }
 
+// =====================
+//  NEW REORDER SYSTEM
+//  (Pointer-based; no OS DnD)
+// =====================
 
+/** Compute a stable key for a collection group. */
+const keyForCollection = (c) => (c || "(None)").toLowerCase();
+
+/** Returns items in a group in persisted order, with any new items appended by createdAt. */
+function orderItemsInGroup(orderMap, groupName, items) {
+  const key = keyForCollection(groupName);
+  const idsOrder = orderMap[key] || [];
+  const byId = new Map(items.map(m => [m.id, m]));
+  const out = [];
+  idsOrder.forEach(id => {
+    if (byId.has(id)) {
+      out.push(byId.get(id));
+      byId.delete(id);
+    }
+  });
+  out.push(...Array.from(byId.values()).sort((a,b) => (a.createdAt||0)-(b.createdAt||0)));
+  return out;
+}
 
 export default function App() {
   const { metas, loading, upsert, remove } = useLocalMeta();
   const [query, setQuery] = useState("");
   const [activeTag, setActiveTag] = useState("");
   const [activeCollection, setActiveCollection] = useState("");
-
   const [lightbox, setLightbox] = useState({ open: false, id: "" });
   const [lightboxBytes, setLightboxBytes] = useState(null);
-
   const [importingCount, setImportingCount] = useState(0);
   const [lastError, setLastError] = useState("");
-
   const [customCollections, setCustomCollections] = useState([]);
   const [collectionsOpen, setCollectionsOpen] = useState(false);
-
   const [activeTier, setActiveTier] = useState("");
   const [favoritesOnly, setFavoritesOnly] = useState(false);
-
-  // View vs Edit mode
   const [editMode, setEditMode] = useState(false);
-
   const [sortMode, setSortMode] = useState("none"); // none | name_asc | name_desc | created_new | created_old | updated_new | pages_desc | pages_asc
-
-  // Bulk edit state
   const [bulkMode, setBulkMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
-
-  // Bulk controls
   const [bulkCollection, setBulkCollection] = useState("");
   const [bulkTier, setBulkTier] = useState("");
-  const [bulkFavorite, setBulkFavorite] = useState(""); // "", "true", "false"
-
+  const [bulkFavorite, setBulkFavorite] = useState("");
   const [reorderMode, setReorderMode] = useState(false);
+
+  // Persisted per-group order
   const [orderMap, setOrderMap] = useState({}); // { [lowercased collection or "(none)"]: string[] }
+  const persistOrder = (next) => {
+    setOrderMap(next);
+    orderStore.setItem("map", next);
+  };
 
+  // NEW: Local drag/drop state
+  const [dragging, setDragging] = useState(/** @type {{active:boolean; id:string; group:string} } */({ active:false, id:"", group:"" }));
+  const [dropTarget, setDropTarget] = useState(/** @type {{id:string; pos:'before'|'after'|null}} */({ id:"", pos:null }));
+  const pointerIdRef = useRef(null); // <-- fixed (no TS generic)
 
-
-  // (optional) remember the toggle across app restarts
+  // remember edit toggle across restarts
   useEffect(() => {
     const saved = localStorage.getItem("pcb-edit");
     if (saved) setEditMode(saved === "1");
@@ -310,7 +313,24 @@ export default function App() {
     localStorage.setItem("pcb-edit", editMode ? "1" : "0");
   }, [editMode]);
 
-
+  // Global OS file-drop shield (prevents navigation if user drops a file outside our DropZone)
+  useEffect(() => {
+    const allow = (e) => {
+      e.preventDefault();
+      try { if (e.dataTransfer) e.dataTransfer.dropEffect = "none"; } catch {}
+    };
+    const opts = { capture: true, passive: false };
+    window.addEventListener("dragover", allow, opts);
+    window.addEventListener("drop", allow, opts);
+    document.addEventListener("dragover", allow, opts);
+    document.addEventListener("drop", allow, opts);
+    return () => {
+      window.removeEventListener("dragover", allow, opts);
+      window.removeEventListener("drop", allow, opts);
+      document.removeEventListener("dragover", allow, opts);
+      document.removeEventListener("drop", allow, opts);
+    };
+  }, []);
 
   const allTags = useMemo(() => {
     const s = new Set();
@@ -324,8 +344,6 @@ export default function App() {
       try {
         let stored = await customCollectionStore.getItem("list");
         if (!Array.isArray(stored)) stored = [];
-
-        // include collections already used by cards but not in defaults/custom
         const extras = Array.from(new Set(
           metas
             .map(m => m.collection)
@@ -335,17 +353,15 @@ export default function App() {
               !stored.some(s => s.toLowerCase() === c.toLowerCase())
             )
         ));
-
         if (extras.length) stored = stored.concat(extras);
         stored.sort((a, b) => a.localeCompare(b));
-
         setCustomCollections(stored);
         await customCollectionStore.setItem("list", stored);
       } catch (e) {
         console.error("Failed to load custom collections", e);
       }
     })();
-  }, [metas]); // re-check when cards change
+  }, [metas]);
 
   useEffect(() => {
     if (!editMode) return;
@@ -369,7 +385,7 @@ export default function App() {
     return out;
   }, [customCollections]);
 
-
+  // Load persisted order map
   useEffect(() => {
     (async () => {
       const map = (await orderStore.getItem("map")) || {};
@@ -377,66 +393,10 @@ export default function App() {
     })();
   }, []);
 
-  function persistOrder(next) {
-    setOrderMap(next);
-    orderStore.setItem("map", next);
-  }
-
-  const keyForCollection = (c) => (c || "(None)").toLowerCase();
-
-
-  function orderItemsInGroup(groupName, items) {
-    const key = keyForCollection(groupName);
-    const idsOrder = orderMap[key] || [];
-    const byId = new Map(items.map(m => [m.id, m]));
-    const out = [];
-
-    // pull known IDs in saved order
-    idsOrder.forEach(id => {
-      if (byId.has(id)) {
-        out.push(byId.get(id));
-        byId.delete(id);
-      }
-    });
-
-    // append any new items not seen yet (keep stable by createdAt)
-    out.push(...Array.from(byId.values()).sort((a,b) => (a.createdAt||0)-(b.createdAt||0)));
-    return out;
-  }
-
-  function moveWithinGroup(groupName, draggedId, targetId, placeBefore=true) {
-    const key = keyForCollection(groupName);
-    const currentIds = orderMap[key] || [];
-
-    // Build the full set of IDs for this group from metas (only those actually in the group)
-    const groupIds = metas
-      .filter(m => (m.collection || "(None)") === groupName)
-      .map(m => m.id);
-
-    // Start from existing order but scoped to this group's ids
-    let ids = currentIds.filter(id => groupIds.includes(id));
-    if (!ids.length) ids = groupIds.slice(); // first time: start with current visual order
-
-    // remove dragged, then insert relative to target
-    ids = ids.filter(id => id !== draggedId);
-    const tIdx = ids.indexOf(targetId);
-    const insertAt = tIdx < 0 ? ids.length : (placeBefore ? tIdx : tIdx + 1);
-    ids.splice(insertAt, 0, draggedId);
-
-    // keep only valid ids
-    ids = ids.filter(id => groupIds.includes(id));
-
-    persistOrder({ ...orderMap, [key]: ids });
-  }
-
-
-
-
-
+  // Filters
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     const isFav = (v) => v === true || v === "true" || v === 1;
-
     return metas.filter((m) => {
       const tags = Array.isArray(m?.tags) ? m.tags : [];
       const col  = m?.collection || "";
@@ -453,7 +413,7 @@ export default function App() {
     });
   }, [metas, query, activeTag, activeCollection, activeTier, favoritesOnly]);
 
-
+  // Sorting
   const sorters = {
     none: () => 0,
     name_asc: (a, b) => a.name.localeCompare(b.name),
@@ -472,7 +432,7 @@ export default function App() {
     return arr;
   }, [filtered, sortMode]);
 
-  // Build folders (groups) by collection for the "no sort" view
+  // Group into collections for folder view
   const groupedByCollection = useMemo(() => {
     const map = new Map();
     for (const m of filtered) {
@@ -481,7 +441,6 @@ export default function App() {
       map.get(key).push(m);
     }
 
-    // Order: default collections (in your defined order), then custom (A–Z), then (None)
     const keys = [];
     const customs = [...map.keys()]
       .filter(k => k !== "(None)" && !DEFAULT_COLLECTIONS.some(d => d.toLowerCase() === k.toLowerCase()))
@@ -494,12 +453,13 @@ export default function App() {
     return keys.map(name => [name, map.get(name)]);
   }, [filtered]);
 
-  // Cards currently visible (respect sorting vs folders)
+  // Visible list (for bulk select helpers)
   const visibleList = useMemo(
     () => (sortMode !== "none" ? sortedFlat : filtered),
     [sortedFlat, filtered, sortMode]
   );
 
+  // Bulk helpers
   function toggleSelected(id) {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -514,46 +474,32 @@ export default function App() {
     setSelectedIds(new Set());
   }
 
-  // Clear selection when leaving bulk mode
+  useEffect(() => { if (!bulkMode) clearSelection(); }, [bulkMode]);
   useEffect(() => {
-    if (!bulkMode) clearSelection();
-  }, [bulkMode]);
-
-  useEffect(() => {
-    if (bulkMode) {
-      setBulkCollection("");
-      setBulkTier("");
-      setBulkFavorite("");
-    }
+    if (bulkMode) { setBulkCollection(""); setBulkTier(""); setBulkFavorite(""); }
   }, [bulkMode]);
 
   async function applyBulk() {
     if (selectedIds.size === 0) return;
 
     const patch = {};
-    // collection
     if (bulkCollection === "__clear__") patch.collection = "";
     else if (bulkCollection && bulkCollection !== "__keep__") patch.collection = bulkCollection;
 
-    // tier
     if (bulkTier === "__clear__") patch.tier = "";
     else if (bulkTier && bulkTier !== "__keep__") patch.tier = bulkTier;
 
-    // favorite
     if (bulkFavorite === "true") patch.favorite = true;
     if (bulkFavorite === "false") patch.favorite = false;
 
     if (Object.keys(patch).length === 0) return;
-
     await Promise.all(Array.from(selectedIds).map((id) => updateMeta(id, patch)));
   }
 
-
-
+  // Collections helpers
   async function addCustomCollection(name) {
     const n = (name || "").trim();
     if (!n) return;
-    // prevent duplicates across defaults and custom
     const exists = DEFAULT_COLLECTIONS.concat(customCollections)
       .some(c => c.toLowerCase() === n.toLowerCase());
     if (exists) return;
@@ -562,42 +508,32 @@ export default function App() {
     await customCollectionStore.setItem("list", next);
   }
 
-
   async function deleteCustomCollection(name) {
     const n = (name || "").trim();
     if (!n) return;
-
-    // Can't delete defaults (they're hardcoded in the app)
     if (DEFAULT_COLLECTIONS.some(c => c.toLowerCase() === n.toLowerCase())) {
       alert("Default collections are built into the app and can’t be deleted here.");
       return;
     }
-
-    // Only proceed if it exists in the custom list
     if (!customCollections.some(c => c.toLowerCase() === n.toLowerCase())) return;
 
     if (!window.confirm(`Delete collection "${n}"?\nCards using it will be set to (None).`)) return;
 
-    // Remove from custom list and persist
     const next = customCollections.filter(c => c.toLowerCase() !== n.toLowerCase());
     setCustomCollections(next);
     await customCollectionStore.setItem("list", next);
 
-    // Clear the collection on any cards that used it
     for (const m of metas) {
       if ((m.collection || "").toLowerCase() === n.toLowerCase()) {
         await updateMeta(m.id, { collection: "" });
       }
     }
-
-    // If you were filtering by the just-deleted collection, clear the filter
     if ((activeCollection || "").toLowerCase() === n.toLowerCase()) {
       setActiveCollection("");
     }
   }
 
-
-
+  // Import / export
   async function importFiles(files) {
     if (!files?.length) return;
     setLastError("");
@@ -605,13 +541,9 @@ export default function App() {
 
     for (const file of files) {
       try {
-        // Read once
         const bytes = new Uint8Array(await file.arrayBuffer());
+        const renderBytes = bytes.slice();
 
-        // 👉 IMPORTANT: make a *separate copy* for pdf.js so our original stays attached
-        const renderBytes = bytes.slice(); // copies the underlying buffer
-
-        // Try to render a thumbnail using the copy
         let dataUrl = "";
         let numPages = 1;
         try {
@@ -641,11 +573,10 @@ export default function App() {
           thumbnailDataUrl: dataUrl,
           createdAt: Date.now(),
           updatedAt: Date.now(),
-          tier: "",            
-          favorite: false     
+          tier: "",
+          favorite: false
         };
 
-        // Save the original (still attached) bytes
         await fileStore.setItem(id, bytes);
         await metaStore.setItem(id, meta);
         await upsert(meta);
@@ -657,9 +588,6 @@ export default function App() {
       }
     }
   }
-
-
-
 
   async function openLightbox(id) {
     const bytes = await fileStore.getItem(id);
@@ -698,11 +626,9 @@ export default function App() {
     for (const [id, arr] of Object.entries(data.files)) {
       await fileStore.setItem(id, new Uint8Array(arr));
     }
-    // Reload to refresh state (simplest path)
     window.location.reload();
   }
 
-  // Graceful handler to prevent picking a PDF in the JSON importer
   async function safeImportJson(file) {
     try {
       if (!file.name.toLowerCase().endsWith('.json')) {
@@ -716,197 +642,294 @@ export default function App() {
     }
   }
 
-  const renderCard = (m) => (
-    <article
-      key={m.id}
-      className={`relative border rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition ${reorderMode ? "cursor-move" : ""}`}
-      draggable={reorderMode && sortMode === "none"}
-      onDragStart={(e) => {
-        if (!reorderMode || sortMode !== "none") return;
-        e.dataTransfer.clearData();
-        e.dataTransfer.setData("text/plain", m.id);                       // <-- required by some webviews
-        e.dataTransfer.setData("application/x-pcb-id", m.id);
-        e.dataTransfer.setData("application/x-pcb-group", m.collection || "(None)");
-        e.dataTransfer.effectAllowed = "move";                            // <-- advertise move
-      }}
-      onDragEnter={(e) => {
-        if (!reorderMode || sortMode !== "none") return;
-        e.preventDefault();                                               // <-- allow drop here
-      }}
-      onDragOver={(e) => {
-        if (!reorderMode || sortMode !== "none") return;
-        e.preventDefault();                                               // <-- critical to avoid 🚫 cursor
-        e.dataTransfer.dropEffect = "move";                               // <-- matches effectAllowed
-      }}
-      onDrop={(e) => {
-        if (!reorderMode || sortMode !== "none") return;
+  // ===== NEW: moveWithinGroup (used by pointer + keyboard) =====
+  function moveWithinGroup(groupName, draggedId, targetId, placeBefore=true) {
+    const key = keyForCollection(groupName);
+    const currentIds = orderMap[key] || [];
+
+    const groupIds = metas
+      .filter(m => (m.collection || "(None)") === groupName)
+      .map(m => m.id);
+
+    let ids = currentIds.filter(id => groupIds.includes(id));
+    if (!ids.length) ids = groupIds.slice();
+
+    ids = ids.filter(id => id !== draggedId);
+    const tIdx = ids.indexOf(targetId);
+    const insertAt = tIdx < 0 ? ids.length : (placeBefore ? tIdx : tIdx + 1);
+    ids.splice(insertAt, 0, draggedId);
+
+    ids = ids.filter(id => groupIds.includes(id));
+    persistOrder({ ...orderMap, [key]: ids });
+  }
+
+  // ===== Global pointer handlers during dragging =====
+  useEffect(() => {
+    if (!dragging.active) return;
+
+    function handlePointerMove(e) {
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      const cardEl = el?.closest?.("[data-card-id]");
+      if (!cardEl) {
+        setDropTarget({ id:"", pos:null });
+        return;
+      }
+      const targetId = cardEl.getAttribute("data-card-id") || "";
+      const targetGroup = cardEl.getAttribute("data-card-group") || "(None)";
+
+      if (!targetId || targetGroup !== dragging.group) {
+        setDropTarget({ id:"", pos:null });
+        return;
+      }
+
+      const rect = cardEl.getBoundingClientRect();
+      const pos = e.clientY < rect.top + rect.height / 2 ? "before" : "after";
+      setDropTarget({ id: targetId, pos });
+    }
+
+    function handlePointerUp() {
+      if (dragging.active && dropTarget.id && dropTarget.pos && dropTarget.id !== dragging.id) {
+        moveWithinGroup(dragging.group, dragging.id, dropTarget.id, dropTarget.pos === "before");
+      }
+      setDragging({ active:false, id:"", group:"" });
+      setDropTarget({ id:"", pos:null });
+      pointerIdRef.current = null;
+    }
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerUp);
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dragging, dropTarget, orderMap, metas]);
+
+  // ===== Keyboard reorder (Ctrl/Cmd + ↑/↓) =====
+  function handleCardKeyDown(e, m, groupItemsOrdered) {
+    if (!(reorderMode && sortMode === "none")) return;
+    const isCtrl = e.ctrlKey || e.metaKey;
+    if (!isCtrl) return;
+
+    const idx = groupItemsOrdered.findIndex(x => x.id === m.id);
+    if (idx < 0) return;
+
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      const neighbor = groupItemsOrdered[Math.max(0, idx - 1)];
+      if (neighbor && neighbor.id !== m.id) {
+        moveWithinGroup(m.collection || "(None)", m.id, neighbor.id, true);
+      }
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      const neighbor = groupItemsOrdered[Math.min(groupItemsOrdered.length - 1, idx + 1)];
+      if (neighbor && neighbor.id !== m.id) {
+        moveWithinGroup(m.collection || "(None)", m.id, neighbor.id, false);
+      }
+    }
+  }
+
+  // ===== Card renderer (pointer-based drag) =====
+  function renderCardFactory(groupOrderedItems) {
+    return function renderCard(m) {
+      const isDragSource = dragging.active && dragging.id === m.id;
+      const isDropTarget = dropTarget.id === m.id;
+      const dropBefore = isDropTarget && dropTarget.pos === "before";
+      const dropAfter  = isDropTarget && dropTarget.pos === "after";
+
+      const startPointerDrag = (e) => {
+        if (!(reorderMode && sortMode === "none")) return;
+        if (e.button !== 0) return; // left-click only
         e.preventDefault();
-        const draggedId =
-          e.dataTransfer.getData("application/x-pcb-id") ||
-          e.dataTransfer.getData("text/plain");
-        const fromGroup = e.dataTransfer.getData("application/x-pcb-group") || "(None)";
-        const toGroup = m.collection || "(None)";
-        if (!draggedId || fromGroup !== toGroup) return;                  // no cross-group moves
+        pointerIdRef.current = e.pointerId ?? null;
+        setDragging({ active:true, id:m.id, group: m.collection || "(None)" });
+        setDropTarget({ id:m.id, pos:"before" });
+      };
 
-        const rect = e.currentTarget.getBoundingClientRect();
-        const placeBefore = e.clientY < rect.top + rect.height / 2;
-        moveWithinGroup(toGroup, draggedId, m.id, placeBefore);
-      }}
-    >
-
-      {bulkMode && (
-        <label
-          className="absolute top-2 left-2 bg-white/80 border rounded-md px-2 py-1 flex items-center gap-2 z-[5]"
-          style={{ pointerEvents: reorderMode ? "none" : "auto" }}
+      return (
+        <article
+          key={m.id}
+          data-card-id={m.id}
+          data-card-group={m.collection || "(None)"}
+          className={`relative border rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition ${
+            reorderMode ? "cursor-default" : ""
+          } ${isDragSource ? "opacity-80" : ""}`}
+          tabIndex={0}
+          onKeyDown={(e) => handleCardKeyDown(e, m, groupOrderedItems)}
         >
-          <input
-            type="checkbox"
-            checked={selectedIds.has(m.id)}
-            onChange={() => toggleSelected(m.id)}
-          />
-          <span className="text-xs">Select</span>
-        </label>
-      )}
+          {/* Drag handle (only visible in Reorder mode & folder view) */}
+          {reorderMode && sortMode === "none" && (
+            <button
+              type="button"
+              className="absolute top-2 left-2 z-[5] rounded-md border bg-white/80 px-2 py-1 text-xs select-none hover:bg-white"
+              onPointerDown={startPointerDrag}
+              title="Drag to reorder (same collection). Tip: Ctrl/Cmd+↑/↓ also works."
+            >
+              ⠿ Drag
+            </button>
+          )}
 
-      <button
-        className="block w-full bg-gray-50"
-        onClick={() => { if (!reorderMode) openLightbox(m.id); }}
-        disabled={reorderMode}
-      >
-        <img
-          src={m.thumbnailDataUrl}
-          alt={m.name}
-          className="w-full h-64 object-contain bg-white"
-          draggable={false}
-          style={{ WebkitUserDrag: "none" }}
-        />
-      </button>
+          {/* Insertion bars */}
+          {dropBefore && (
+            <div className="absolute top-0 left-0 right-0 h-1 bg-amber-400 shadow-[0_0_0_2px_rgba(251,191,36,0.3)] z-[4]" />
+          )}
+          {dropAfter && (
+            <div className="absolute bottom-0 left-0 right-0 h-1 bg-amber-400 shadow-[0_0_0_2px_rgba(251,191,36,0.3)] z-[4]" />
+          )}
 
+          {bulkMode && (
+            <label
+              className="absolute top-2 right-2 bg-white/80 border rounded-md px-2 py-1 flex items-center gap-2 z-[5]"
+            >
+              <input
+                type="checkbox"
+                checked={selectedIds.has(m.id)}
+                onChange={() => toggleSelected(m.id)}
+              />
+              <span className="text-xs">Select</span>
+            </label>
+          )}
 
-      <div className="p-3">
-        <div className="flex items-center justify-between">
-          <div className="font-medium truncate pr-2" title={m.name}>{m.name}</div>
-          <button
-            className={`shrink-0 text-3xl leading-none w-9 h-9 -mr-1
+          <div
+            onClick={() => { if (!reorderMode) openLightbox(m.id); }}
+            style={reorderMode ? { pointerEvents: "none" } : undefined}
+            className="block w-full bg-gray-50"
+          >
+            <img
+              src={m.thumbnailDataUrl}
+              alt={m.name}
+              className="w-full h-64 object-contain bg-white"
+              draggable={false}
+            />
+          </div>
+
+          <div className="p-3">
+            <div className="flex items-center justify-between">
+              <div className="font-medium truncate pr-2" title={m.name}>{m.name}</div>
+              <button
+                className={`shrink-0 text-3xl leading-none w-9 h-9 -mr-1
                         flex items-center justify-center rounded-full
                         hover:bg-gray-100 focus:outline-none focus-visible:ring
                         ${m.favorite ? "text-yellow-500" : "text-gray-300 hover:text-gray-400"}`}
-            onClick={() => updateMeta(m.id, { favorite: !m.favorite })}
-            title={m.favorite ? "Unfavorite" : "Favorite"}
-            aria-label={m.favorite ? "Unfavorite" : "Favorite"}
-            aria-pressed={m.favorite ? "true" : "false"}
-          >
-            {m.favorite ? "★" : "☆"}
-          </button>
-        </div>
-
-        <div className="text-xs text-gray-500 mb-2">{m.pages} page{m.pages > 1 ? "s" : ""}</div>
-
-        {/* EDIT vs VIEW UI exactly as you already have */}
-        {editMode ? (
-          <>
-            <div className="flex items-center gap-2 mb-2">
-              <select
-                className="border rounded-md px-2 py-1 text-sm w-full"
-                value={m.collection || ""}
-                onChange={async (e) => {
-                  const val = e.target.value;
-                  if (val === "__add_new__") {
-                    const name = window.prompt("New collection name");
-                    const n = (name || "").trim();
-                    if (n) {
-                      await addCustomCollection(n);
-                      await updateMeta(m.id, { collection: n });
-                    }
-                    e.target.value = m.collection || "";
-                  } else {
-                    await updateMeta(m.id, { collection: val });
-                  }
-                }}
+                onClick={() => updateMeta(m.id, { favorite: !m.favorite })}
+                title={m.favorite ? "Unfavorite" : "Favorite"}
+                aria-label={m.favorite ? "Unfavorite" : "Favorite"}
+                aria-pressed={m.favorite ? "true" : "false"}
               >
-                <option value="">(None)</option>
-                <optgroup label="Default collections">
-                  {DEFAULT_COLLECTIONS.map((c) => (
-                    <option key={"def-" + c} value={c}>{c}</option>
-                  ))}
-                </optgroup>
-                <optgroup label="Custom collections">
-                  {customCollections.map((c) => (
-                    <option key={"cus-" + c} value={c}>{c}</option>
-                  ))}
-                </optgroup>
-                <option value="__add_new__">+ Add new…</option>
-              </select>
-            </div>
-
-            <div className="flex items-center gap-2 mb-2">
-              <select
-                className="border rounded-md px-2 py-1 text-sm w-full"
-                value={m.tier || ""}
-                onChange={(e) => updateMeta(m.id, { tier: e.target.value })}
-              >
-                <option value="">(No tier)</option>
-                {TIER_OPTIONS.map((t) => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
-            </div>
-
-            <TagEditor value={m.tags} onChange={(tags) => updateMeta(m.id, { tags })} />
-
-            <div className="flex items-center justify-between mt-3">
-              <div className="flex gap-2">
-                <button className="px-3 py-1 rounded-md border" onClick={() => openLightbox(m.id)}>
-                  View
-                </button>
-                <button
-                  className="px-3 py-1 rounded-md border"
-                  onClick={() => setEditMode(false)}
-                  title="Exit edit mode"
-                >
-                  Done
-                </button>
-              </div>
-
-              <button
-                className="px-3 py-1 rounded-md border text-red-600"
-                onClick={() => remove(m.id)}
-              >
-                Delete
+                {m.favorite ? "★" : "☆"}
               </button>
             </div>
-          </>
-        ) : (
-          <>
-            <div className="flex flex-wrap gap-2 mb-2">
-              <span className="inline-flex items-center rounded-full border px-2 py-1 text-xs bg-gray-50">
-                {m.collection || "(None)"}
-              </span>
-              <span className="inline-flex items-center rounded-full border px-2 py-1 text-xs bg-gray-50">
-                {m.tier || "(No tier)"}
-              </span>
-            </div>
 
-            {Array.isArray(m.tags) && m.tags.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-2">
-                {m.tags.map((t, i) => (
-                  <span key={i} className="inline-flex items-center rounded-full bg-gray-100 border px-2 py-1 text-xs">
-                    #{t}
+            <div className="text-xs text-gray-500 mb-2">{m.pages} page{m.pages > 1 ? "s" : ""}</div>
+
+            {editMode ? (
+              <>
+                <div className="flex items-center gap-2 mb-2">
+                  <select
+                    className="border rounded-md px-2 py-1 text-sm w-full"
+                    value={m.collection || ""}
+                    onChange={async (e) => {
+                      const val = e.target.value;
+                      if (val === "__add_new__") {
+                        const name = window.prompt("New collection name");
+                        const n = (name || "").trim();
+                        if (n) {
+                          await addCustomCollection(n);
+                          await updateMeta(m.id, { collection: n });
+                        }
+                        e.target.value = m.collection || "";
+                      } else {
+                        await updateMeta(m.id, { collection: val });
+                      }
+                    }}
+                  >
+                    <option value="">(None)</option>
+                    <optgroup label="Default collections">
+                      {DEFAULT_COLLECTIONS.map((c) => (
+                        <option key={"def-" + c} value={c}>{c}</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Custom collections">
+                      {customCollections.map((c) => (
+                        <option key={"cus-" + c} value={c}>{c}</option>
+                      ))}
+                    </optgroup>
+                    <option value="__add_new__">+ Add new…</option>
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-2 mb-2">
+                  <select
+                    className="border rounded-md px-2 py-1 text-sm w-full"
+                    value={m.tier || ""}
+                    onChange={(e) => updateMeta(m.id, { tier: e.target.value })}
+                  >
+                    <option value="">(No tier)</option>
+                    {TIER_OPTIONS.map((t) => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <TagEditor value={m.tags} onChange={(tags) => updateMeta(m.id, { tags })} />
+
+                <div className="flex items-center justify-between mt-3">
+                  <div className="flex gap-2">
+                    <button className="px-3 py-1 rounded-md border" onClick={() => openLightbox(m.id)}>
+                      View
+                    </button>
+                    <button
+                      className="px-3 py-1 rounded-md border"
+                      onClick={() => setEditMode(false)}
+                      title="Exit edit mode"
+                    >
+                      Done
+                    </button>
+                  </div>
+
+                  <button
+                    className="px-3 py-1 rounded-md border text-red-600"
+                    onClick={() => remove(m.id)}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex flex-wrap gap-2 mb-2">
+                  <span className="inline-flex items-center rounded-full border px-2 py-1 text-xs bg-gray-50">
+                    {m.collection || "(None)"}
                   </span>
-                ))}
-              </div>
+                  <span className="inline-flex items-center rounded-full border px-2 py-1 text-xs bg-gray-50">
+                    {m.tier || "(No tier)"}
+                  </span>
+                </div>
+
+                {Array.isArray(m.tags) && m.tags.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    {m.tags.map((t, i) => (
+                      <span key={i} className="inline-flex items-center rounded-full bg-gray-100 border px-2 py-1 text-xs">
+                        #{t}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between mt-3">
+                  <button className="px-3 py-1 rounded-md border" onClick={() => openLightbox(m.id)}>View</button>
+                  <button className="px-3 py-1 rounded-md border" onClick={() => setEditMode(true)}>Edit</button>
+                </div>
+              </>
             )}
-
-            <div className="flex items-center justify-between mt-3">
-              <button className="px-3 py-1 rounded-md border" onClick={() => openLightbox(m.id)}>View</button>
-              <button className="px-3 py-1 rounded-md border" onClick={() => setEditMode(true)}>Edit</button>
-            </div>
-          </>
-        )}
-      </div>
-    </article>
-  );
-
+          </div>
+        </article>
+      );
+    }
+  }
 
   return (
     <div className="min-h-screen bg-white">
@@ -941,7 +964,6 @@ export default function App() {
             ))}
           </select>
 
-          {/* Sort control goes here */}
           <select
             className="border rounded-xl px-3 py-2"
             value={sortMode}
@@ -958,13 +980,8 @@ export default function App() {
             <option value="pages_asc">Pages low→high</option>
           </select>
 
-
-          
-
           <label
-            className={`px-3 py-2 rounded-xl border cursor-pointer ${
-              favoritesOnly ? "bg-yellow-50 border-yellow-300" : ""
-            }`}
+            className={`px-3 py-2 rounded-xl border cursor-pointer ${favoritesOnly ? "bg-yellow-50 border-yellow-300" : ""}`}
             title="Show favorites only"
           >
             <input
@@ -976,12 +993,8 @@ export default function App() {
             ★ Favorites
           </label>
 
-          
-
           <label
-            className={`px-3 py-2 rounded-xl border cursor-pointer ${
-              editMode ? "bg-blue-50 border-blue-300" : ""
-            }`}
+            className={`px-3 py-2 rounded-xl border cursor-pointer ${editMode ? "bg-blue-50 border-blue-300" : ""}`}
             title="Toggle edit mode"
           >
             <input
@@ -994,21 +1007,6 @@ export default function App() {
           </label>
 
           <label
-            className={`px-3 py-2 rounded-xl border cursor-pointer ${
-              bulkMode ? "bg-purple-50 border-purple-300" : ""
-            }`}
-            title="Select multiple cards to edit at once"
-          >
-            <input
-              type="checkbox"
-              className="mr-2"
-              checked={bulkMode}
-              onChange={(e) => setBulkMode(e.target.checked)}
-            />
-            Bulk edit
-          </label>
-          
-          <label
             className={`px-3 py-2 rounded-xl border cursor-pointer ${reorderMode ? "bg-amber-50 border-amber-300" : ""} ${sortMode !== "none" ? "opacity-50 cursor-not-allowed" : ""}`}
             title="Drag cards to reorder within each collection (only in Default order view)"
           >
@@ -1017,15 +1015,17 @@ export default function App() {
               className="mr-2"
               checked={reorderMode}
               disabled={sortMode !== "none"}
-              onChange={(e) => setReorderMode(e.target.checked)}
+              onChange={(e) => {
+                setReorderMode(e.target.checked);
+                setDragging({ active:false, id:"", group:"" });
+                setDropTarget({ id:"", pos:null });
+              }}
             />
             Reorder
           </label>
 
-
           <button className="px-3 py-2 rounded-xl border" onClick={exportJson}>Export</button>
 
-          {/* New: explicit PDF adder button */}
           <label className="px-3 py-2 rounded-xl border cursor-pointer">
             Add PDFs
             <input
@@ -1041,7 +1041,6 @@ export default function App() {
             />
           </label>
 
-          {/* Restore from JSON backup (formerly "Import") */}
           <label className="px-3 py-2 rounded-xl border cursor-pointer">
             Restore
             <input
@@ -1062,6 +1061,20 @@ export default function App() {
           >
             Manage
           </button>
+
+          <label
+            className={`px-3 py-2 rounded-xl border cursor-pointer ${bulkMode ? "bg-purple-50 border-purple-300" : ""}`}
+            title="Select multiple cards to edit at once"
+          >
+            <input
+              type="checkbox"
+              className="mr-2"
+              checked={bulkMode}
+              onChange={(e) => setBulkMode(e.target.checked)}
+            />
+            Bulk edit
+          </label>
+
           {bulkMode && (
             <div className="w-full mt-2 flex flex-wrap items-center gap-2">
               <span className="text-sm">
@@ -1146,7 +1159,6 @@ export default function App() {
               </button>
             </div>
           )}
-
         </div>
       </header>
 
@@ -1164,7 +1176,6 @@ export default function App() {
           </div>
         </div>
       )}
-
 
       <main className="max-w-6xl mx-auto p-4">
         <DropZone onFiles={importFiles} />
@@ -1185,28 +1196,29 @@ export default function App() {
           ) : sortMode !== "none" ? (
             // FLAT VIEW WHEN SORTING
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-              {sortedFlat.map(renderCard)}
+              {sortedFlat.map(renderCardFactory(sortedFlat))}
             </div>
           ) : (
             // FOLDERS (GROUPED BY COLLECTION) WHEN sortMode === "none"
             <div className="space-y-8">
-              {groupedByCollection.map(([name, items]) => (
-                <section key={name} className="border rounded-2xl overflow-hidden">
-                  <div className="px-4 py-2 bg-gray-50 border-b flex items-center justify-between">
-                    <h2 className="font-semibold">{name}</h2>
-                    <span className="text-xs text-gray-500">
-                      {items.length} item{items.length !== 1 ? "s" : ""}
-                    </span>
-                  </div>
-                  <div className="p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-                    {orderItemsInGroup(name, items).map(renderCard)}
-                  </div>
-
-                </section>
-              ))}
+              {groupedByCollection.map(([name, items]) => {
+                const ordered = orderItemsInGroup(orderMap, name, items);
+                return (
+                  <section key={name} className="border rounded-2xl overflow-hidden">
+                    <div className="px-4 py-2 bg-gray-50 border-b flex items-center justify-between">
+                      <h2 className="font-semibold">{name}</h2>
+                      <span className="text-xs text-gray-500">
+                        {items.length} item{items.length !== 1 ? "s" : ""}
+                      </span>
+                    </div>
+                    <div className="p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+                      {ordered.map(renderCardFactory(ordered))}
+                    </div>
+                  </section>
+                );
+              })}
             </div>
           )}
-
         </div>
       </main>
 
@@ -1224,7 +1236,6 @@ export default function App() {
         custom={customCollections}
         onDelete={deleteCustomCollection}
       />
-
     </div>
   );
 }
@@ -1276,7 +1287,6 @@ function CollectionsManager({ open, onClose, defaults, custom, onDelete }) {
   );
 }
 
-
 function TagEditor({ value, onChange }) {
   const [text, setText] = useState("");
   const tags = value || [];
@@ -1324,5 +1334,3 @@ function TagEditor({ value, onChange }) {
     </div>
   );
 }
-
-

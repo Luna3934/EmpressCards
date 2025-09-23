@@ -14,7 +14,9 @@
       {
         "title": "pdf-card-binder-desktop",
         "width": 800,
-        "height": 600
+        "height": 600,
+        "resizable": true,
+        "label": "main"
       }
     ],
     "security": {
