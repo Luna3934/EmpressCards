@@ -36,8 +36,48 @@ const customCollectionStore = localforage.createInstance({
 // Types
 /** @typedef {{ id: string; name: string; pages: number; tags: string[]; collection?: string; thumbnailDataUrl: string; createdAt: number; updatedAt: number; tier?: string; favorite?: boolean; }} CardMeta */
 
+const THEME_KEY = "pcb-theme"; // 'light' | 'dark'
 const DEBUG_DND = false;
 const d = (...args) => { if (DEBUG_DND) console.log("[DND]", ...args); };
+
+// ---------- Theme helpers (works regardless of Tailwind darkMode) ----------
+function getInitialTheme() {
+  try {
+    const saved = localStorage.getItem(THEME_KEY);
+    if (saved === "light" || saved === "dark") return saved;
+  } catch {}
+  if (typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches) {
+    return "dark";
+  }
+  return "light";
+}
+function applyThemeClass(theme) {
+  try {
+    const root = document.documentElement;
+    if (theme === "dark") root.classList.add("dark");
+    else root.classList.remove("dark");
+    // Optional: hint to the UA for form controls / scrollbars
+    root.style.colorScheme = theme;
+  } catch {}
+}
+
+function ThemeToggle({ theme, setTheme }) {
+  const isDark = theme === "dark";
+  return (
+    <button
+      type="button"
+      onClick={() => setTheme(t => (t === "dark" ? "light" : "dark"))}
+      className={`px-3 py-2 rounded-xl border flex items-center gap-2
+        ${isDark ? "border-slate-700 bg-slate-800 text-slate-100 hover:bg-slate-700" :
+                   "border-slate-300 bg-white text-slate-800 hover:bg-slate-50"}`}
+      title={`Switch to ${isDark ? "light" : "dark"} mode`}
+      aria-pressed={isDark ? "true" : "false"}
+    >
+      <span className="text-lg" aria-hidden>{isDark ? "🌙" : "☀️"}</span>
+      <span className="text-sm">{isDark ? "Dark" : "Light"}</span>
+    </button>
+  );
+}
 
 // ---------- Utilities ----------
 async function renderPdfPageToDataUrl(arrayBuffer, pageNumber = 1, scale = 0.9) {
@@ -48,10 +88,8 @@ async function renderPdfPageToDataUrl(arrayBuffer, pageNumber = 1, scale = 0.9) 
   const ctx = canvas.getContext("2d");
   canvas.width = viewport.width;
   canvas.height = viewport.height;
-  const renderContext = { canvasContext: ctx, viewport };
-  await page.render(renderContext).promise;
-  const dataUrl = canvas.toDataURL("image/png");
-  return { dataUrl, numPages: pdf.numPages };
+  await page.render({ canvasContext: ctx, viewport }).promise;
+  return { dataUrl: canvas.toDataURL("image/png"), numPages: pdf.numPages };
 }
 
 function useLocalMeta() {
@@ -89,26 +127,32 @@ function useLocalMeta() {
   return { metas, loading, upsert, remove };
 }
 
-function Tag({ label, onClick, active = false }) {
+function Tag({ label, onClick, active = false, theme }) {
+  const isDark = theme === "dark";
   return (
     <button
       onClick={onClick}
-      className={`px-2 py-1 rounded-full border text-xs mr-2 mb-2 ${
-        active ? "bg-gray-800 text-white" : "hover:bg-gray-100"
-      }`}
+      className={`px-2 py-1 rounded-full border text-xs mr-2 mb-2
+        ${active
+          ? (isDark ? "bg-slate-200 text-slate-900 border-slate-300" : "bg-gray-800 text-white border-gray-800")
+          : (isDark ? "hover:bg-slate-800 border-slate-600 text-slate-200" : "hover:bg-gray-100 border-slate-300 text-slate-700")
+        }`}
     >
       #{label}
     </button>
   );
 }
 
-function DropZone({ onFiles }) {
+function DropZone({ onFiles, theme }) {
   const [over, setOver] = useState(false);
   const inputRef = useRef(null);
+  const isDark = theme === "dark";
 
   return (
     <div
-      className={`w-full border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer ${over ? "bg-gray-50" : ""}`}
+      className={`w-full border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer
+        ${isDark ? "border-slate-600" : "border-slate-300"}
+        ${over ? (isDark ? "bg-slate-800" : "bg-gray-50") : ""}`}
       onDragOver={(e) => { e.preventDefault(); setOver(true); }}
       onDragLeave={() => setOver(false)}
       onDrop={(e) => {
@@ -123,7 +167,9 @@ function DropZone({ onFiles }) {
       onClick={() => inputRef.current?.click()}
     >
       <p className="font-medium">Drop PDF cards here or click to select</p>
-      <p className="text-xs text-gray-500 mt-1">We generate thumbnails and store everything locally in your browser.</p>
+      <p className={`text-xs mt-1 ${isDark ? "text-gray-400" : "text-gray-500"}`}>
+        We generate thumbnails and store everything locally in your browser.
+      </p>
       <input
         ref={inputRef}
         type="file"
@@ -140,7 +186,7 @@ function DropZone({ onFiles }) {
   );
 }
 
-function Lightbox({ open, onClose, fileBytes, name }) {
+function Lightbox({ open, onClose, fileBytes, name, theme }) {
   const [pageNum, setPageNum] = useState(1);
   const [numPages, setNumPages] = useState(1);
   const [pdf, setPdf] = useState(null);
@@ -218,6 +264,8 @@ function Lightbox({ open, onClose, fileBytes, name }) {
   const set100 = () => setScale(1);
   const fit = () => setScale("fit");
 
+  const isDark = theme === "dark";
+
   return (
     <div className="fixed inset-0 bg-black/70 z-50 flex flex-col" onClick={onClose}>
       <div
@@ -238,7 +286,7 @@ function Lightbox({ open, onClose, fileBytes, name }) {
         </div>
       </div>
       <div className="flex-1 flex items-center justify-center px-6 pb-6" onClick={(e) => e.stopPropagation()}>
-        <div className="shadow-2xl bg-white rounded">
+        <div className={`shadow-2xl rounded ${isDark ? "bg-slate-900" : "bg-white"}`}>
           <canvas ref={canvasRef} />
         </div>
       </div>
@@ -272,6 +320,30 @@ function orderItemsInGroup(orderMap, groupName, items) {
 
 export default function App() {
   const { metas, loading, upsert, remove } = useLocalMeta();
+
+  // THEME state & persistence
+  const [theme, setTheme] = useState(getInitialTheme());
+  useEffect(() => {
+    applyThemeClass(theme);
+    try { localStorage.setItem(THEME_KEY, theme); } catch {}
+  }, [theme]);
+
+  // If user hasn't chosen, follow OS changes
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(THEME_KEY);
+      if (saved === "light" || saved === "dark") return;
+      const media = window.matchMedia("(prefers-color-scheme: dark)");
+      const handler = () => setTheme(media.matches ? "dark" : "light");
+      media.addEventListener?.("change", handler);
+      media.addListener?.(handler);
+      return () => {
+        media.removeEventListener?.("change", handler);
+        media.removeListener?.(handler);
+      };
+    } catch {}
+  }, []);
+
   const [query, setQuery] = useState("");
   const [activeTag, setActiveTag] = useState("");
   const [activeCollection, setActiveCollection] = useState("");
@@ -284,7 +356,7 @@ export default function App() {
   const [activeTier, setActiveTier] = useState("");
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [editMode, setEditMode] = useState(false);
-  const [sortMode, setSortMode] = useState("none"); // none | name_asc | name_desc | created_new | created_old | updated_new | pages_desc | pages_asc
+  const [sortMode, setSortMode] = useState("none");
   const [bulkMode, setBulkMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkCollection, setBulkCollection] = useState("");
@@ -293,20 +365,17 @@ export default function App() {
   const [reorderMode, setReorderMode] = useState(false);
 
   // Persisted per-group order
-  const [orderMap, setOrderMap] = useState({}); // { [lowercased collection or "(none)"]: string[] }
+  const [orderMap, setOrderMap] = useState({});
   const persistOrder = (next) => {
     setOrderMap(next);
     orderStore.setItem("map", next);
   };
 
-  // NEW: Local drag/drop state
-  const [dragging, setDragging] = useState(/** @type {{active:boolean; id:string; group:string} } */({ active:false, id:"", group:"" }));
-  const [dropTarget, setDropTarget] = useState(/** @type {{id:string; pos:'before'|'after'|null}} */({ id:"", pos:null }));
-  const pointerIdRef = useRef(null); // <-- fixed (no TS generic)
-
-  // near your other dnd state
+  // DnD state
+  const [dragging, setDragging] = useState({ active:false, id:"", group:"" });
+  const [dropTarget, setDropTarget] = useState({ id:"", pos:null });
+  const pointerIdRef = useRef(null);
   const [dropLine, setDropLine] = useState({ groupKey: "", x: 0, top: 0, height: 0, visible: false });
-
 
   // remember edit toggle across restarts
   useEffect(() => {
@@ -317,7 +386,7 @@ export default function App() {
     localStorage.setItem("pcb-edit", editMode ? "1" : "0");
   }, [editMode]);
 
-  // Global OS file-drop shield (prevents navigation if user drops a file outside our DropZone)
+  // Global OS file-drop shield
   useEffect(() => {
     const allow = (e) => {
       e.preventDefault();
@@ -342,7 +411,7 @@ export default function App() {
     return Array.from(s).sort();
   }, [metas]);
 
-  // Load custom collections (and migrate any existing card collections not in defaults)
+  // Load custom collections (+ migrate found ones)
   useEffect(() => {
     (async () => {
       try {
@@ -374,7 +443,6 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [editMode]);
 
-  // Use Default + Custom (no duplicates, defaults first)
   const allCollections = useMemo(() => {
     const seen = new Set();
     const out = [];
@@ -389,7 +457,7 @@ export default function App() {
     return out;
   }, [customCollections]);
 
-  // Load persisted order map
+  // Load order map
   useEffect(() => {
     (async () => {
       const map = (await orderStore.getItem("map")) || {};
@@ -436,7 +504,7 @@ export default function App() {
     return arr;
   }, [filtered, sortMode]);
 
-  // Group into collections for folder view
+  // Group into collections
   const groupedByCollection = useMemo(() => {
     const map = new Map();
     for (const m of filtered) {
@@ -457,21 +525,11 @@ export default function App() {
     return keys.map(name => [name, map.get(name)]);
   }, [filtered]);
 
-  // Precompute id -> group for quick lookups
-  const idToGroup = useMemo(() => {
-    const m = new Map();
-    metas.forEach(x => m.set(x.id, x.collection || "(None)"));
-    return m;
-  }, [metas]);
-
-
-  // Visible list (for bulk select helpers)
   const visibleList = useMemo(
     () => (sortMode !== "none" ? sortedFlat : filtered),
     [sortedFlat, filtered, sortMode]
   );
 
-  // Bulk helpers
   function toggleSelected(id) {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -479,12 +537,8 @@ export default function App() {
       return next;
     });
   }
-  function selectAllVisible() {
-    setSelectedIds(new Set(visibleList.map((m) => m.id)));
-  }
-  function clearSelection() {
-    setSelectedIds(new Set());
-  }
+  function selectAllVisible() { setSelectedIds(new Set(visibleList.map((m) => m.id))); }
+  function clearSelection() { setSelectedIds(new Set()); }
 
   useEffect(() => { if (!bulkMode) clearSelection(); }, [bulkMode]);
   useEffect(() => {
@@ -508,7 +562,6 @@ export default function App() {
     await Promise.all(Array.from(selectedIds).map((id) => updateMeta(id, patch)));
   }
 
-  // Collections helpers
   async function addCustomCollection(name) {
     const n = (name || "").trim();
     if (!n) return;
@@ -545,7 +598,6 @@ export default function App() {
     }
   }
 
-  // Import / export
   async function importFiles(files) {
     if (!files?.length) return;
     setLastError("");
@@ -654,7 +706,7 @@ export default function App() {
     }
   }
 
-  // ===== NEW: moveWithinGroup (used by pointer + keyboard) =====
+  // ===== moveWithinGroup (pointer + keyboard) =====
   function moveWithinGroup(groupName, draggedId, targetId, placeBefore=true) {
     const key = keyForCollection(groupName);
     const currentIds = orderMap[key] || [];
@@ -681,8 +733,6 @@ export default function App() {
 
     function handlePointerMove(e) {
       const el = document.elementFromPoint(e.clientX, e.clientY);
-
-      // find a card under the pointer
       const cardEl = el?.closest?.("[data-card-id]");
       if (!cardEl) {
         setDropTarget({ id: "", pos: null });
@@ -699,12 +749,10 @@ export default function App() {
         return;
       }
 
-      // decide before/after by LEFT/RIGHT half of the card
       const rect = cardEl.getBoundingClientRect();
       const pos = e.clientX < rect.left + rect.width / 2 ? "before" : "after";
       setDropTarget({ id: targetId, pos });
 
-      // compute X inside the group's grid container
       const gridEl = cardEl.closest("[data-grid-key]");
       if (!gridEl) {
         setDropLine({ groupKey: "", x: 0, top: 0, height: 0, visible: false });
@@ -715,29 +763,21 @@ export default function App() {
       const styles = getComputedStyle(gridEl);
       const colGap = parseFloat(styles.columnGap) || 0;
 
-      // put line centered in the *vertical* gap between cards
-      let x =
-        pos === "before"
-          ? rect.left - gridRect.left - colGap / 2
-          : rect.right - gridRect.left + colGap / 2;
+      let x = pos === "before"
+        ? rect.left - gridRect.left - colGap / 2
+        : rect.right - gridRect.left + colGap / 2;
 
-      // clamp to container
       x = Math.max(0, Math.min(gridRect.width, x));
 
       const groupKey = gridEl.getAttribute("data-grid-key") || "";
-      // pick either a fixed inset or a percentage shrink
-      const INSET = 8; // pixels shaved off top & bottom
+      const INSET = 8;
       let lineHeight = Math.max(24, rect.height - INSET * 2);
       let lineTop = (rect.top - gridRect.top) + INSET;
-      // clamp to container
       if (lineTop + lineHeight > gridRect.height) {
         lineTop = Math.max(0, gridRect.height - lineHeight);
       }
       setDropLine({ groupKey, x, top: lineTop, height: lineHeight, visible: true });
     }
-
-
-
 
     function handlePointerUp() {
       if (dragging.active && dropTarget.id && dropTarget.pos && dropTarget.id !== dragging.id) {
@@ -749,17 +789,14 @@ export default function App() {
       pointerIdRef.current = null;
     }
 
-
     window.addEventListener("pointermove", handlePointerMove);
     window.addEventListener("pointerup", handlePointerUp);
     window.addEventListener("pointercancel", handlePointerUp);
-
     return () => {
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
       window.removeEventListener("pointercancel", handlePointerUp);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dragging, dropTarget, orderMap, metas]);
 
   // ===== Keyboard reorder (Ctrl/Cmd + ↑/↓) =====
@@ -788,15 +825,14 @@ export default function App() {
 
   // ===== Card renderer (pointer-based drag) =====
   function renderCardFactory(groupOrderedItems) {
+    const isDark = theme === "dark";
     return function renderCard(m) {
       const isDragSource = dragging.active && dragging.id === m.id;
       const isDropTarget = dropTarget.id === m.id;
-      const dropBefore = isDropTarget && dropTarget.pos === "before";
-      const dropAfter  = isDropTarget && dropTarget.pos === "after";
 
       const startPointerDrag = (e) => {
         if (!(reorderMode && sortMode === "none")) return;
-        if (e.button !== 0) return; // left-click only
+        if (e.button !== 0) return;
         e.preventDefault();
         pointerIdRef.current = e.pointerId ?? null;
         setDragging({ active:true, id:m.id, group: m.collection || "(None)" });
@@ -808,17 +844,19 @@ export default function App() {
           key={m.id}
           data-card-id={m.id}
           data-card-group={m.collection || "(None)"}
-          className={`relative border rounded-2xl shadow-sm hover:shadow-md transition ${
-            reorderMode ? "cursor-default" : ""
-          } ${isDragSource ? "opacity-80" : ""}`}
+          className={`relative border rounded-2xl shadow-sm hover:shadow-md transition
+            ${reorderMode ? "cursor-default" : ""} ${isDragSource ? "opacity-80" : ""}
+            ${isDark ? "border-slate-700 bg-slate-900" : "border-slate-200 bg-white"}`}
           tabIndex={0}
           onKeyDown={(e) => handleCardKeyDown(e, m, groupOrderedItems)}
         >
-          {/* Drag handle (only visible in Reorder mode & folder view) */}
+          {/* Drag handle */}
           {reorderMode && sortMode === "none" && (
             <button
               type="button"
-              className="absolute top-2 left-2 z-[5] rounded-md border bg-white/80 px-2 py-1 text-xs select-none hover:bg-white"
+              className={`absolute top-2 left-2 z-[5] rounded-md border px-2 py-1 text-xs select-none
+                ${isDark ? "bg-slate-900/80 hover:bg-slate-900 border-slate-700 text-slate-100"
+                         : "bg-white/80 hover:bg-white border-slate-300 text-slate-800"}`}
               onPointerDown={startPointerDrag}
               title="Drag to reorder (same collection). Tip: Ctrl/Cmd+↑/↓ also works."
             >
@@ -826,11 +864,11 @@ export default function App() {
             </button>
           )}
 
-          
-
           {bulkMode && (
             <label
-              className="absolute top-2 right-2 bg-white/80 border rounded-md px-2 py-1 flex items-center gap-2 z-[5]"
+              className={`absolute top-2 right-2 rounded-md px-2 py-1 flex items-center gap-2 z-[5] border
+                ${isDark ? "bg-slate-900/80 border-slate-700 text-slate-100"
+                         : "bg-white/80 border-slate-300 text-slate-800"}`}
             >
               <input
                 type="checkbox"
@@ -841,18 +879,15 @@ export default function App() {
             </label>
           )}
 
-          
-
-
           <div
             onClick={() => { if (!reorderMode) openLightbox(m.id); }}
             style={reorderMode ? { pointerEvents: "none" } : undefined}
-            className="block w-full bg-gray-50"
+            className={`${isDark ? "bg-slate-800" : "bg-gray-50"}`}
           >
             <img
               src={m.thumbnailDataUrl}
               alt={m.name}
-              className="w-full h-64 object-contain bg-white"
+              className={`w-full h-64 object-contain ${isDark ? "bg-slate-900" : "bg-white"}`}
               draggable={false}
             />
           </div>
@@ -872,8 +907,8 @@ export default function App() {
               <button
                 className={`shrink-0 text-3xl leading-none w-9 h-9 -mr-1
                         flex items-center justify-center rounded-full
-                        hover:bg-gray-100 focus:outline-none focus-visible:ring
-                        ${m.favorite ? "text-yellow-500" : "text-gray-300 hover:text-gray-400"}`}
+                        ${isDark ? "hover:bg-slate-800 text-gray-400" : "hover:bg-gray-100 text-gray-300"}
+                        focus:outline-none focus-visible:ring`}
                 onClick={() => updateMeta(m.id, { favorite: !m.favorite })}
                 title={m.favorite ? "Unfavorite" : "Favorite"}
                 aria-label={m.favorite ? "Unfavorite" : "Favorite"}
@@ -883,13 +918,16 @@ export default function App() {
               </button>
             </div>
 
-            <div className="text-xs text-gray-500 mb-2">{m.pages} page{m.pages > 1 ? "s" : ""}</div>
+            <div className={`text-xs mb-2 ${isDark ? "text-gray-400" : "text-gray-500"}`}>
+              {m.pages} page{m.pages > 1 ? "s" : ""}
+            </div>
 
             {editMode ? (
               <>
                 <div className="flex items-center gap-2 mb-2">
                   <select
-                    className="border rounded-md px-2 py-1 text-sm w-full"
+                    className={`border rounded-md px-2 py-1 text-sm w-full
+                      ${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-300"}`}
                     value={m.collection || ""}
                     onChange={async (e) => {
                       const val = e.target.value;
@@ -923,7 +961,8 @@ export default function App() {
 
                 <div className="flex items-center gap-2 mb-2">
                   <select
-                    className="border rounded-md px-2 py-1 text-sm w-full"
+                    className={`border rounded-md px-2 py-1 text-sm w-full
+                      ${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-300"}`}
                     value={m.tier || ""}
                     onChange={(e) => updateMeta(m.id, { tier: e.target.value })}
                   >
@@ -934,15 +973,15 @@ export default function App() {
                   </select>
                 </div>
 
-                <TagEditor value={m.tags} onChange={(tags) => updateMeta(m.id, { tags })} />
+                <TagEditor value={m.tags} onChange={(tags) => updateMeta(m.id, { tags })} theme={theme} />
 
                 <div className="flex items-center justify-between mt-3">
                   <div className="flex gap-2">
-                    <button className="px-3 py-1 rounded-md border" onClick={() => openLightbox(m.id)}>
+                    <button className={`px-3 py-1 rounded-md border ${isDark ? "border-slate-700 bg-slate-800" : "border-slate-300 bg-white"}`} onClick={() => openLightbox(m.id)}>
                       View
                     </button>
                     <button
-                      className="px-3 py-1 rounded-md border"
+                      className={`px-3 py-1 rounded-md border ${isDark ? "border-slate-700 bg-slate-800" : "border-slate-300 bg-white"}`}
                       onClick={() => setEditMode(false)}
                       title="Exit edit mode"
                     >
@@ -951,7 +990,7 @@ export default function App() {
                   </div>
 
                   <button
-                    className="px-3 py-1 rounded-md border text-red-600"
+                    className={`px-3 py-1 rounded-md border text-red-600 ${isDark ? "border-slate-700" : "border-slate-300"}`}
                     onClick={() => remove(m.id)}
                   >
                     Delete
@@ -961,10 +1000,12 @@ export default function App() {
             ) : (
               <>
                 <div className="flex flex-wrap gap-2 mb-2">
-                  <span className="inline-flex items-center rounded-full border px-2 py-1 text-xs bg-gray-50">
+                  <span className={`inline-flex items-center rounded-full border px-2 py-1 text-xs
+                    ${isDark ? "bg-slate-800 border-slate-700" : "bg-gray-50 border-slate-300"}`}>
                     {m.collection || "(None)"}
                   </span>
-                  <span className="inline-flex items-center rounded-full border px-2 py-1 text-xs bg-gray-50">
+                  <span className={`inline-flex items-center rounded-full border px-2 py-1 text-xs
+                    ${isDark ? "bg-slate-800 border-slate-700" : "bg-gray-50 border-slate-300"}`}>
                     {m.tier || "(No tier)"}
                   </span>
                 </div>
@@ -972,7 +1013,8 @@ export default function App() {
                 {Array.isArray(m.tags) && m.tags.length > 0 && (
                   <div className="flex flex-wrap gap-2 mb-2">
                     {m.tags.map((t, i) => (
-                      <span key={i} className="inline-flex items-center rounded-full bg-gray-100 border px-2 py-1 text-xs">
+                      <span key={i} className={`inline-flex items-center rounded-full border px-2 py-1 text-xs
+                        ${isDark ? "bg-slate-800 border-slate-700" : "bg-gray-100 border-slate-300"}`}>
                         #{t}
                       </span>
                     ))}
@@ -980,8 +1022,8 @@ export default function App() {
                 )}
 
                 <div className="flex items-center justify-between mt-3">
-                  <button className="px-3 py-1 rounded-md border" onClick={() => openLightbox(m.id)}>View</button>
-                  <button className="px-3 py-1 rounded-md border" onClick={() => setEditMode(true)}>Edit</button>
+                  <button className={`px-3 py-1 rounded-md border ${isDark ? "border-slate-700 bg-slate-800" : "border-slate-300 bg-white"}`} onClick={() => openLightbox(m.id)}>View</button>
+                  <button className={`px-3 py-1 rounded-md border ${isDark ? "border-slate-700 bg-slate-800" : "border-slate-300 bg-white"}`} onClick={() => setEditMode(true)}>Edit</button>
                 </div>
               </>
             )}
@@ -991,19 +1033,27 @@ export default function App() {
     }
   }
 
+  const isDark = theme === "dark";
+
   return (
-    <div className="min-h-screen bg-white">
-      <header className="sticky top-0 z-40 bg-white/90 backdrop-blur border-b">
+    <div className={`min-h-screen ${isDark ? "bg-slate-900 text-slate-100" : "bg-white text-slate-900"}`}>
+      <header className={`sticky top-0 z-40 backdrop-blur border-b
+         ${isDark ? "bg-slate-900/90 border-slate-800" : "bg-white/90 border-slate-200"}`}>
         <div className="max-w-6xl mx-auto p-4 flex flex-wrap items-center gap-3">
           <h1 className="text-2xl font-bold">Empress Card Binder</h1>
+
+          <ThemeToggle theme={theme} setTheme={setTheme} />
+
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search name or tag…"
-            className="flex-1 min-w-[200px] border rounded-xl px-3 py-2"
+            className={`flex-1 min-w-[200px] border rounded-xl px-3 py-2 placeholder:text-gray-400
+              ${isDark ? "bg-slate-800 border-slate-700 text-slate-100" : "bg-white border-slate-300 text-slate-900"}`}
           />
           <select
-            className="border rounded-xl px-3 py-2"
+            className={`border rounded-xl px-3 py-2
+              ${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-300"}`}
             value={activeCollection}
             onChange={(e) => setActiveCollection(e.target.value)}
           >
@@ -1014,7 +1064,8 @@ export default function App() {
           </select>
 
           <select
-            className="border rounded-xl px-3 py-2"
+            className={`border rounded-xl px-3 py-2
+              ${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-300"}`}
             value={activeTier}
             onChange={(e) => setActiveTier(e.target.value)}
           >
@@ -1025,7 +1076,8 @@ export default function App() {
           </select>
 
           <select
-            className="border rounded-xl px-3 py-2"
+            className={`border rounded-xl px-3 py-2`
+              + ` ${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-300"}`}
             value={sortMode}
             onChange={(e) => setSortMode(e.target.value)}
             title="Sorting disables folder grouping"
@@ -1041,7 +1093,10 @@ export default function App() {
           </select>
 
           <label
-            className={`px-3 py-2 rounded-xl border cursor-pointer ${favoritesOnly ? "bg-yellow-50 border-yellow-300" : ""}`}
+            className={`px-3 py-2 rounded-xl border cursor-pointer
+              ${favoritesOnly
+                ? (isDark ? "bg-yellow-900/20 border-yellow-700" : "bg-yellow-50 border-yellow-300")
+                : (isDark ? "border-slate-700" : "border-slate-300")}`}
             title="Show favorites only"
           >
             <input
@@ -1054,7 +1109,10 @@ export default function App() {
           </label>
 
           <label
-            className={`px-3 py-2 rounded-xl border cursor-pointer ${editMode ? "bg-blue-50 border-blue-300" : ""}`}
+            className={`px-3 py-2 rounded-xl border cursor-pointer
+              ${editMode
+                ? (isDark ? "bg-blue-900/20 border-blue-700" : "bg-blue-50 border-blue-300")
+                : (isDark ? "border-slate-700" : "border-slate-300")}`}
             title="Toggle edit mode"
           >
             <input
@@ -1067,7 +1125,11 @@ export default function App() {
           </label>
 
           <label
-            className={`px-3 py-2 rounded-xl border cursor-pointer ${reorderMode ? "bg-amber-50 border-amber-300" : ""} ${sortMode !== "none" ? "opacity-50 cursor-not-allowed" : ""}`}
+            className={`px-3 py-2 rounded-xl border cursor-pointer
+              ${sortMode !== "none" ? "opacity-50 cursor-not-allowed" : ""}
+              ${reorderMode
+                ? (isDark ? "bg-amber-900/20 border-amber-700" : "bg-amber-50 border-amber-300")
+                : (isDark ? "border-slate-700" : "border-slate-300")}`}
             title="Drag cards to reorder within each collection (only in Default order view)"
           >
             <input
@@ -1084,9 +1146,25 @@ export default function App() {
             Reorder
           </label>
 
-          <button className="px-3 py-2 rounded-xl border" onClick={exportJson}>Export</button>
+          <label
+            className={`px-3 py-2 rounded-xl border cursor-pointer
+              ${bulkMode
+                ? (isDark ? "bg-purple-900/20 border-purple-700" : "bg-purple-50 border-purple-300")
+                : (isDark ? "border-slate-700" : "border-slate-300")}`}
+            title="Select multiple cards to edit at once"
+          >
+            <input
+              type="checkbox"
+              className="mr-2"
+              checked={bulkMode}
+              onChange={(e) => setBulkMode(e.target.checked)}
+            />
+            Bulk edit
+          </label>
 
-          <label className="px-3 py-2 rounded-xl border cursor-pointer">
+          <button className={`px-3 py-2 rounded-xl border ${isDark ? "border-slate-700 bg-slate-800" : "border-slate-300 bg-white"}`} onClick={exportJson}>Export</button>
+
+          <label className={`px-3 py-2 rounded-xl border cursor-pointer ${isDark ? "border-slate-700 bg-slate-800" : "border-slate-300 bg-white"}`}>
             Add PDFs
             <input
               type="file"
@@ -1101,7 +1179,7 @@ export default function App() {
             />
           </label>
 
-          <label className="px-3 py-2 rounded-xl border cursor-pointer">
+          <label className={`px-3 py-2 rounded-xl border cursor-pointer ${isDark ? "border-slate-700 bg-slate-800" : "border-slate-300 bg-white"}`}>
             Restore
             <input
               type="file"
@@ -1116,40 +1194,29 @@ export default function App() {
           </label>
 
           <button
-            className="px-3 py-2 rounded-xl border"
+            className={`px-3 py-2 rounded-xl border ${isDark ? "border-slate-700 bg-slate-800" : "border-slate-300 bg-white"}`}
             onClick={() => setCollectionsOpen(true)}
           >
             Manage
           </button>
 
-          <label
-            className={`px-3 py-2 rounded-xl border cursor-pointer ${bulkMode ? "bg-purple-50 border-purple-300" : ""}`}
-            title="Select multiple cards to edit at once"
-          >
-            <input
-              type="checkbox"
-              className="mr-2"
-              checked={bulkMode}
-              onChange={(e) => setBulkMode(e.target.checked)}
-            />
-            Bulk edit
-          </label>
+          
 
           {bulkMode && (
             <div className="w-full mt-2 flex flex-wrap items-center gap-2">
               <span className="text-sm">
                 Selected: {selectedIds.size} / {visibleList.length}
               </span>
-              <button className="px-2 py-1 border rounded" onClick={selectAllVisible}>
+              <button className={`px-2 py-1 border rounded ${isDark ? "border-slate-700 bg-slate-800" : "border-slate-300 bg-white"}`} onClick={selectAllVisible}>
                 Select all visible
               </button>
-              <button className="px-2 py-1 border rounded" onClick={clearSelection}>
+              <button className={`px-2 py-1 border rounded ${isDark ? "border-slate-700 bg-slate-800" : "border-slate-300 bg-white"}`} onClick={clearSelection}>
                 Clear selection
               </button>
 
               {/* Bulk Collection */}
               <select
-                className="border rounded-xl px-3 py-2"
+                className={`border rounded-xl px-3 py-2 ${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-300"}`}
                 value={bulkCollection}
                 onChange={async (e) => {
                   const v = e.target.value;
@@ -1185,7 +1252,7 @@ export default function App() {
 
               {/* Bulk Tier */}
               <select
-                className="border rounded-xl px-3 py-2"
+                className={`border rounded-xl px-3 py-2 ${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-300"}`}
                 value={bulkTier}
                 onChange={(e) => setBulkTier(e.target.value)}
                 title="Set or clear tier for selected"
@@ -1199,7 +1266,7 @@ export default function App() {
 
               {/* Bulk Favorite */}
               <select
-                className="border rounded-xl px-3 py-2"
+                className={`border rounded-xl px-3 py-2 ${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-300"}`}
                 value={bulkFavorite}
                 onChange={(e) => setBulkFavorite(e.target.value)}
                 title="Set or unset favorite for selected"
@@ -1224,35 +1291,36 @@ export default function App() {
 
       {importingCount > 0 && (
         <div className="max-w-6xl mx-auto mt-3 px-4">
-          <div className="rounded-xl border bg-white px-4 py-2 text-sm">
+          <div className={`rounded-xl border px-4 py-2 text-sm ${isDark ? "bg-slate-900 border-slate-700" : "bg-white border-slate-300"}`}>
             Importing {importingCount} file{importingCount > 1 ? "s" : ""}…
           </div>
         </div>
       )}
       {lastError && (
         <div className="max-w-6xl mx-auto mt-3 px-4">
-          <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-2 text-sm text-red-700">
+          <div className={`rounded-xl px-4 py-2 text-sm
+            ${isDark ? "border-red-800 bg-red-900/20 text-red-300" : "border-red-300 bg-red-50 text-red-700"} border`}>
             {lastError}
           </div>
         </div>
       )}
 
       <main className="max-w-6xl mx-auto p-4">
-        <DropZone onFiles={importFiles} />
+        <DropZone onFiles={importFiles} theme={theme} />
 
         <div className="mt-6">
           <div className="flex flex-wrap items-center gap-2 mb-3">
-            <span className="text-sm text-gray-600 mr-2">Tags:</span>
-            <Tag label="All" active={!activeTag} onClick={() => setActiveTag("")} />
+            <span className={`text-sm mr-2 ${isDark ? "text-gray-300" : "text-gray-600"}`}>Tags:</span>
+            <Tag label="All" active={!activeTag} onClick={() => setActiveTag("")} theme={theme} />
             {allTags.map((t) => (
-              <Tag key={t} label={t} active={activeTag === t} onClick={() => setActiveTag(t)} />
+              <Tag key={t} label={t} active={activeTag === t} onClick={() => setActiveTag(t)} theme={theme} />
             ))}
           </div>
 
           {loading ? (
-            <div className="text-gray-500">Loading…</div>
+            <div className={isDark ? "text-gray-400" : "text-gray-500"}>Loading…</div>
           ) : filtered.length === 0 ? (
-            <div className="text-gray-500">No cards yet. Import PDFs above.</div>
+            <div className={isDark ? "text-gray-400" : "text-gray-500"}>No cards yet. Import PDFs above.</div>
           ) : sortMode !== "none" ? (
             // FLAT VIEW WHEN SORTING
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
@@ -1264,10 +1332,11 @@ export default function App() {
               {groupedByCollection.map(([name, items]) => {
                 const ordered = orderItemsInGroup(orderMap, name, items);
                 return (
-                  <section key={name} className="border rounded-2xl overflow-hidden">
-                    <div className="px-4 py-2 bg-gray-50 border-b flex items-center justify-between">
+                  <section key={name} className={`border rounded-2xl overflow-hidden ${isDark ? "border-slate-700" : "border-slate-200"}`}>
+                    <div className={`px-4 py-2 border-b flex items-center justify-between
+                      ${isDark ? "bg-slate-800 border-slate-700" : "bg-gray-50 border-slate-200"}`}>
                       <h2 className="font-semibold">{name}</h2>
-                      <span className="text-xs text-gray-500">
+                      <span className={`text-xs ${isDark ? "text-gray-400" : "text-gray-500"}`}>
                         {items.length} item{items.length !== 1 ? "s" : ""}
                       </span>
                     </div>
@@ -1280,7 +1349,7 @@ export default function App() {
                         >
                           {ordered.map(renderCardFactory(ordered))}
 
-                          {/* single horizontal drop indicator */}
+                          {/* single vertical drop indicator */}
                           {reorderMode &&
                             dropLine.visible &&
                             dropLine.groupKey === gridKey && (
@@ -1299,7 +1368,6 @@ export default function App() {
                         </div>
                       );
                     })()}
-
                   </section>
                 );
               })}
@@ -1313,6 +1381,7 @@ export default function App() {
         onClose={() => setLightbox({ open: false, id: "" })}
         fileBytes={lightboxBytes}
         name={metas.find((m) => m.id === lightbox.id)?.name || ""}
+        theme={theme}
       />
 
       <CollectionsManager
@@ -1321,44 +1390,46 @@ export default function App() {
         defaults={DEFAULT_COLLECTIONS}
         custom={customCollections}
         onDelete={deleteCustomCollection}
+        theme={theme}
       />
     </div>
   );
 }
 
-function CollectionsManager({ open, onClose, defaults, custom, onDelete }) {
+function CollectionsManager({ open, onClose, defaults, custom, onDelete, theme }) {
   if (!open) return null;
+  const isDark = theme === "dark";
   return (
     <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl p-4 w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
+      <div className={`rounded-2xl p-4 w-full max-w-lg ${isDark ? "bg-slate-900" : "bg-white"}`} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-3">
           <div className="font-semibold">Manage Collections</div>
-          <button className="px-3 py-1 rounded-md border" onClick={onClose}>Close</button>
+          <button className={`px-3 py-1 rounded-md border ${isDark ? "border-slate-700 bg-slate-800" : "border-slate-300 bg-white"}`} onClick={onClose}>Close</button>
         </div>
 
         <div className="mb-4">
-          <div className="text-xs font-semibold text-gray-600 mb-1">Default (built-in)</div>
+          <div className={`text-xs font-semibold mb-1 ${isDark ? "text-gray-300" : "text-gray-600"}`}>Default (built-in)</div>
           <div className="space-y-1">
             {DEFAULT_COLLECTIONS.map(c => (
               <div key={c} className="flex items-center justify-between text-sm">
                 <span>{c}</span>
-                <span className="text-gray-400">(locked)</span>
+                <span className={isDark ? "text-gray-500" : "text-gray-400"}>(locked)</span>
               </div>
             ))}
           </div>
         </div>
 
         <div>
-          <div className="text-xs font-semibold text-gray-600 mb-1">Custom</div>
+          <div className={`text-xs font-semibold mb-1 ${isDark ? "text-gray-300" : "text-gray-600"}`}>Custom</div>
           {custom.length === 0 ? (
-            <div className="text-sm text-gray-500">No custom collections yet.</div>
+            <div className={isDark ? "text-gray-400" : "text-gray-500"}>No custom collections yet.</div>
           ) : (
             <div className="space-y-1">
               {custom.map(c => (
                 <div key={c} className="flex items-center justify-between text-sm">
                   <span>{c}</span>
                   <button
-                    className="px-2 py-1 rounded-md border text-red-600"
+                    className={`px-2 py-1 rounded-md border text-red-600 ${isDark ? "border-slate-700 bg-slate-800" : "border-slate-300 bg-white"}`}
                     onClick={() => onDelete(c)}
                   >
                     Delete
@@ -1375,13 +1446,11 @@ function CollectionsManager({ open, onClose, defaults, custom, onDelete }) {
 
 function EditableName({ value, onSave }) {
   const [text, setText] = React.useState(value);
-
-  // Keep local state in sync if the name changes elsewhere
   React.useEffect(() => setText(value), [value]);
 
   const commit = React.useCallback(() => {
     const next = text.trim();
-    if (!next || next === value) return; // ignore empty/unchanged
+    if (!next || next === value) return;
     onSave(next);
   }, [text, value, onSave]);
 
@@ -1402,11 +1471,10 @@ function EditableName({ value, onSave }) {
   );
 }
 
-function TagEditor({ value, onChange }) {
+function TagEditor({ value, onChange, theme }) {
   const [text, setText] = useState("");
   const tags = value || [];
-
-
+  const isDark = theme === "dark";
 
   function addTag(t) {
     const tag = t.trim();
@@ -1427,15 +1495,17 @@ function TagEditor({ value, onChange }) {
     <div>
       <div className="flex flex-wrap gap-2 mb-2">
         {tags.map((t, i) => (
-          <span key={i} className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100 text-sm">
+          <span key={i} className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-sm border
+            ${isDark ? "bg-slate-800 border-slate-700" : "bg-gray-100 border-slate-300"}`}>
             #{t}
-            <button className="text-gray-500 hover:text-black" onClick={() => removeTag(i)} aria-label={`remove ${t}`}>×</button>
+            <button className={`${isDark ? "text-gray-400 hover:text-white" : "text-gray-500 hover:text-black"}`} onClick={() => removeTag(i)} aria-label={`remove ${t}`}>×</button>
           </span>
         ))}
       </div>
       <div className="flex items-center gap-2">
         <input
-          className="border rounded-md px-2 py-1 text-sm w-full"
+          className={`border rounded-md px-2 py-1 text-sm w-full
+            ${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-300"}`}
           placeholder="Add tag and press Enter"
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -1446,7 +1516,7 @@ function TagEditor({ value, onChange }) {
             }
           }}
         />
-        <button className="px-3 py-1 rounded-md border" onClick={() => addTag(text)}>Add</button>
+        <button className={`px-3 py-1 rounded-md border ${isDark ? "border-slate-700 bg-slate-800" : "border-slate-300 bg-white"}`} onClick={() => addTag(text)}>Add</button>
       </div>
     </div>
   );
