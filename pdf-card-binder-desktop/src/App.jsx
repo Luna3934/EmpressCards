@@ -304,6 +304,10 @@ export default function App() {
   const [dropTarget, setDropTarget] = useState(/** @type {{id:string; pos:'before'|'after'|null}} */({ id:"", pos:null }));
   const pointerIdRef = useRef(null); // <-- fixed (no TS generic)
 
+  // near your other dnd state
+  const [dropLine, setDropLine] = useState({ groupKey: "", x: 0, top: 0, height: 0, visible: false });
+
+
   // remember edit toggle across restarts
   useEffect(() => {
     const saved = localStorage.getItem("pcb-edit");
@@ -452,6 +456,14 @@ export default function App() {
 
     return keys.map(name => [name, map.get(name)]);
   }, [filtered]);
+
+  // Precompute id -> group for quick lookups
+  const idToGroup = useMemo(() => {
+    const m = new Map();
+    metas.forEach(x => m.set(x.id, x.collection || "(None)"));
+    return m;
+  }, [metas]);
+
 
   // Visible list (for bulk select helpers)
   const visibleList = useMemo(
@@ -669,23 +681,63 @@ export default function App() {
 
     function handlePointerMove(e) {
       const el = document.elementFromPoint(e.clientX, e.clientY);
+
+      // find a card under the pointer
       const cardEl = el?.closest?.("[data-card-id]");
       if (!cardEl) {
-        setDropTarget({ id:"", pos:null });
+        setDropTarget({ id: "", pos: null });
+        setDropLine({ groupKey: "", x: 0, top: 0, height: 0, visible: false });
         return;
       }
+
       const targetId = cardEl.getAttribute("data-card-id") || "";
       const targetGroup = cardEl.getAttribute("data-card-group") || "(None)";
 
       if (!targetId || targetGroup !== dragging.group) {
-        setDropTarget({ id:"", pos:null });
+        setDropTarget({ id: "", pos: null });
+        setDropLine({ groupKey: "", x: 0, top: 0, height: 0, visible: false });
         return;
       }
 
+      // decide before/after by LEFT/RIGHT half of the card
       const rect = cardEl.getBoundingClientRect();
-      const pos = e.clientY < rect.top + rect.height / 2 ? "before" : "after";
+      const pos = e.clientX < rect.left + rect.width / 2 ? "before" : "after";
       setDropTarget({ id: targetId, pos });
+
+      // compute X inside the group's grid container
+      const gridEl = cardEl.closest("[data-grid-key]");
+      if (!gridEl) {
+        setDropLine({ groupKey: "", x: 0, top: 0, height: 0, visible: false });
+        return;
+      }
+
+      const gridRect = gridEl.getBoundingClientRect();
+      const styles = getComputedStyle(gridEl);
+      const colGap = parseFloat(styles.columnGap) || 0;
+
+      // put line centered in the *vertical* gap between cards
+      let x =
+        pos === "before"
+          ? rect.left - gridRect.left - colGap / 2
+          : rect.right - gridRect.left + colGap / 2;
+
+      // clamp to container
+      x = Math.max(0, Math.min(gridRect.width, x));
+
+      const groupKey = gridEl.getAttribute("data-grid-key") || "";
+      // pick either a fixed inset or a percentage shrink
+      const INSET = 8; // pixels shaved off top & bottom
+      let lineHeight = Math.max(24, rect.height - INSET * 2);
+      let lineTop = (rect.top - gridRect.top) + INSET;
+      // clamp to container
+      if (lineTop + lineHeight > gridRect.height) {
+        lineTop = Math.max(0, gridRect.height - lineHeight);
+      }
+      setDropLine({ groupKey, x, top: lineTop, height: lineHeight, visible: true });
     }
+
+
+
 
     function handlePointerUp() {
       if (dragging.active && dropTarget.id && dropTarget.pos && dropTarget.id !== dragging.id) {
@@ -693,8 +745,10 @@ export default function App() {
       }
       setDragging({ active:false, id:"", group:"" });
       setDropTarget({ id:"", pos:null });
+      setDropLine({ groupKey: "", x: 0, top: 0, height: 0, visible: false });
       pointerIdRef.current = null;
     }
+
 
     window.addEventListener("pointermove", handlePointerMove);
     window.addEventListener("pointerup", handlePointerUp);
@@ -754,7 +808,7 @@ export default function App() {
           key={m.id}
           data-card-id={m.id}
           data-card-group={m.collection || "(None)"}
-          className={`relative border rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition ${
+          className={`relative border rounded-2xl shadow-sm hover:shadow-md transition ${
             reorderMode ? "cursor-default" : ""
           } ${isDragSource ? "opacity-80" : ""}`}
           tabIndex={0}
@@ -772,13 +826,7 @@ export default function App() {
             </button>
           )}
 
-          {/* Insertion bars */}
-          {dropBefore && (
-            <div className="absolute top-0 left-0 right-0 h-1 bg-amber-400 shadow-[0_0_0_2px_rgba(251,191,36,0.3)] z-[4]" />
-          )}
-          {dropAfter && (
-            <div className="absolute bottom-0 left-0 right-0 h-1 bg-amber-400 shadow-[0_0_0_2px_rgba(251,191,36,0.3)] z-[4]" />
-          )}
+          
 
           {bulkMode && (
             <label
@@ -792,6 +840,9 @@ export default function App() {
               <span className="text-xs">Select</span>
             </label>
           )}
+
+          
+
 
           <div
             onClick={() => { if (!reorderMode) openLightbox(m.id); }}
@@ -808,7 +859,16 @@ export default function App() {
 
           <div className="p-3">
             <div className="flex items-center justify-between">
-              <div className="font-medium truncate pr-2" title={m.name}>{m.name}</div>
+              <div className="flex-1 min-w-0 pr-2">
+                {editMode ? (
+                  <EditableName
+                    value={m.name}
+                    onSave={(next) => updateMeta(m.id, { name: next })}
+                  />
+                ) : (
+                  <div className="font-medium truncate" title={m.name}>{m.name}</div>
+                )}
+              </div>
               <button
                 className={`shrink-0 text-3xl leading-none w-9 h-9 -mr-1
                         flex items-center justify-center rounded-full
@@ -935,7 +995,7 @@ export default function App() {
     <div className="min-h-screen bg-white">
       <header className="sticky top-0 z-40 bg-white/90 backdrop-blur border-b">
         <div className="max-w-6xl mx-auto p-4 flex flex-wrap items-center gap-3">
-          <h1 className="text-2xl font-bold">PDF Card Binder</h1>
+          <h1 className="text-2xl font-bold">Empress Card Binder</h1>
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -1211,9 +1271,35 @@ export default function App() {
                         {items.length} item{items.length !== 1 ? "s" : ""}
                       </span>
                     </div>
-                    <div className="p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-                      {ordered.map(renderCardFactory(ordered))}
-                    </div>
+                    {(() => {
+                      const gridKey = keyForCollection(name);
+                      return (
+                        <div
+                          className="relative p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4"
+                          data-grid-key={gridKey}
+                        >
+                          {ordered.map(renderCardFactory(ordered))}
+
+                          {/* single horizontal drop indicator */}
+                          {reorderMode &&
+                            dropLine.visible &&
+                            dropLine.groupKey === gridKey && (
+                              <div
+                                className="pointer-events-none absolute z-20"
+                                style={{
+                                  left: `${dropLine.x}px`,
+                                  top: `${dropLine.top}px`,
+                                  height: `${dropLine.height}px`,
+                                  transform: "translateX(-50%)",
+                                }}
+                              >
+                                <div className="w-1 h-full rounded-full bg-gradient-to-b from-sky-400 via-indigo-500 to-indigo-600 shadow-[0_0_0_3px_rgba(99,102,241,0.28)]" />
+                              </div>
+                            )}
+                        </div>
+                      );
+                    })()}
+
                   </section>
                 );
               })}
@@ -1287,9 +1373,40 @@ function CollectionsManager({ open, onClose, defaults, custom, onDelete }) {
   );
 }
 
+function EditableName({ value, onSave }) {
+  const [text, setText] = React.useState(value);
+
+  // Keep local state in sync if the name changes elsewhere
+  React.useEffect(() => setText(value), [value]);
+
+  const commit = React.useCallback(() => {
+    const next = text.trim();
+    if (!next || next === value) return; // ignore empty/unchanged
+    onSave(next);
+  }, [text, value, onSave]);
+
+  return (
+    <input
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") { e.preventDefault(); commit(); e.currentTarget.blur(); }
+        if (e.key === "Escape") { setText(value); e.currentTarget.blur(); }
+      }}
+      placeholder="Untitled card"
+      spellCheck={false}
+      className="w-full min-w-0 bg-transparent border border-transparent focus:border-indigo-400 focus:ring-0 rounded-md px-1 h-7 text-sm font-medium"
+      aria-label="Card name"
+    />
+  );
+}
+
 function TagEditor({ value, onChange }) {
   const [text, setText] = useState("");
   const tags = value || [];
+
+
 
   function addTag(t) {
     const tag = t.trim();
