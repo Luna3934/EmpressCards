@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    pdf_card_binder_desktop_lib::run()
+    empress_card_collection::run()
 }
