@@ -39,7 +39,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDdCRjM2NzNFQjdFN0FDOApSV1RJZW43cmN6YS9CMS9RYnVMejZ1UGZEM0xadlR1bTJIQ2xQWU02U3M1REdPYmRlQXMvb1ZhQgo=",
       "endpoints": [
-        "https://github.com/<you>/<repo>/releases/latest/download/latest.json"
+        "https://github.com/Luna3934/EmpressCards/releases/latest/download/latest.json"
       ],
       "windows": { "installMode": "passive" }
     }
