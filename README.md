@@ -13,6 +13,6 @@ https://www.twitch.tv/jannerith
 
 
 ## Version Notes
-0.1.* - Pre-release development
-0.2.* - Review development
-1.*.* - Official first release
+- 0.1.* - Pre-release development
+- 0.2.* - Review development
+- 1.*.* - Official first release
