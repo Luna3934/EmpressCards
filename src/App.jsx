@@ -1201,7 +1201,7 @@ export default function App() {
     }
 
     const backup = {
-      app: "empress-card-binder",
+      app: "empire-card-collection",
       schemaVersion: BACKUP_SCHEMA_VERSION,
       exportedAt: new Date().toISOString(),
       // core library
@@ -1647,7 +1647,7 @@ export default function App() {
       <header className={`sticky top-0 z-40 backdrop-blur border-b
          ${isDark ? "bg-slate-900/90 border-slate-800" : "bg-white/90 border-slate-200"}`}>
         <div className="max-w-6xl mx-auto p-4 flex flex-wrap items-center gap-3">
-          <h1 className="text-2xl font-bold">Empress Card Binder</h1>
+          <h1 className="text-2xl font-bold">Empire Card Collection</h1>
 
           <ThemeToggle theme={theme} setTheme={setTheme} />
 
