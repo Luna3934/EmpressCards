@@ -6,8 +6,9 @@ https://www.twitch.tv/jannerith
 ## How to Install
 
 - Find "Releases" on the right side and click on the latest
-- Windows: Click the .exe file
-- Mac: Click the .dmg file
+    - Windows: Click the .exe file
+        - Windows if "Windows protected your PC" pops up, click "More info" then "Run anyway"
+    - Mac: Click the .dmg file
 - Once it downloads, double click to open the installer
 - Click through the installer until it finishes
 

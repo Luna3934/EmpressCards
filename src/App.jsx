@@ -549,52 +549,9 @@ async function manualCheck() {
 
 export default function App() {
   const { metas, loading, upsert, remove } = useLocalMeta();
-  const [updateProgress, setUpdateProgress] = useState<number | null>(null);
+  const [updateProgress, setUpdateProgress] = useState(null);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    (async () => {
-      try {
-        // Skip in dev server (optional; remove if you want to test in dev)
-        if (import.meta.env.DEV) return;
-
-        const update = await check(); // checks latest.json
-        if (!update?.available || cancelled) return;
-
-        const ok = window.confirm(
-          `Empress Card Binder ${update.version} is available.\n\nInstall now?`
-        );
-        if (!ok || cancelled) return;
-
-        await update.downloadAndInstall((p) => {
-          // p.completedBytes / p.contentLength are also available
-          if (cancelled) return;
-          if (p && typeof p.percent === "number") setUpdateProgress(p.percent);
-        });
-
-        // On Windows with passive mode, installer usually restarts the app.
-        // For other platforms, you may need to relaunch:
-        try { await relaunch(); } catch { /* no-op if not needed */ }
-
-      } catch (err) {
-        console.error("Updater check failed:", err);
-      }
-    })();
-
-    return () => { cancelled = true; };
-  }, []);
-
-  return (
-    <div>
-      {/* …your app UI… */}
-      {updateProgress !== null && (
-        <div style={{ position: "fixed", bottom: 12, right: 12 }}>
-          Updating… {updateProgress.toFixed(0)}%
-        </div>
-      )}
-    </div>
-  );
+  
 
   // THEME state & persistence
   const [theme, setTheme] = useState(getInitialTheme());
