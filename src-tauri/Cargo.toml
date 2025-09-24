@@ -28,3 +28,7 @@ tauri-plugin-dialog = "^2"
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-updater = "2"
 
+
+[[bin]]
+name = "empire_card_app"   # <- different name than the lib
+path = "src/main.rs"
