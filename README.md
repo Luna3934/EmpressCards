@@ -1,7 +1,18 @@
-# Tauri + React
+# Empress Card Collection
 
-This template should help get you started developing with Tauri and React in Vite.
+This program helps you view and organize your cards earned under the royal Empress Isa
+https://www.twitch.tv/jannerith
 
-## Recommended IDE Setup
+## How to Install
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+- Find "Releases" on the right side and click on the latest
+- Windows: Click the .exe file
+- Mac: Click the .dmg file
+- Once it downloads, double click to open the installer
+- Click through the installer until it finishes
+
+
+## Version Notes
+0.1.* - Pre-release development
+0.2.* - Review development
+1.*.* - Official first release

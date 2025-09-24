@@ -6,7 +6,11 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest           # NSIS .exe for Windows (simple for users)
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]   # ← add macOS runner
+    runs-on: ${{ matrix.os }}
     permissions:
       contents: write                 # needed to create a GitHub Release
     steps:
