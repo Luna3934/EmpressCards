@@ -163,11 +163,12 @@ async function renderPdfPageToDataUrl(arrayBuffer, pageNumber = 1, scale = 0.9) 
   return { dataUrl: canvas.toDataURL("image/png"), numPages: pdf.numPages };
 }
 
+
 async function checkForUpdates() {
-  const update = await check()
-  if (update) {
-    await update.downloadAndInstall()
-    await relaunch()
+  const update = await check();           // contacts latest.json
+  if (update?.available) {
+    await update.downloadAndInstall();    // downloads, verifies, installs
+    // app will restart on Windows after install
   }
 }
 
@@ -534,10 +535,66 @@ function orderItemsInGroup(orderMap, groupName, items) {
   return out;
 }
 
+async function manualCheck() {
+  const update = await check();
+  if (update?.available) {
+    if (confirm(`Update ${update.version} available. Install now?`)) {
+      await update.downloadAndInstall();
+      try { await relaunch(); } catch {}
+    }
+  } else {
+    alert("You’re up to date!");
+  }
+}
+
 export default function App() {
   const { metas, loading, upsert, remove } = useLocalMeta();
+  const [updateProgress, setUpdateProgress] = useState<number | null>(null);
 
-  useTauriAutoUpdate({ promptUser: true });
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        // Skip in dev server (optional; remove if you want to test in dev)
+        if (import.meta.env.DEV) return;
+
+        const update = await check(); // checks latest.json
+        if (!update?.available || cancelled) return;
+
+        const ok = window.confirm(
+          `Empress Card Binder ${update.version} is available.\n\nInstall now?`
+        );
+        if (!ok || cancelled) return;
+
+        await update.downloadAndInstall((p) => {
+          // p.completedBytes / p.contentLength are also available
+          if (cancelled) return;
+          if (p && typeof p.percent === "number") setUpdateProgress(p.percent);
+        });
+
+        // On Windows with passive mode, installer usually restarts the app.
+        // For other platforms, you may need to relaunch:
+        try { await relaunch(); } catch { /* no-op if not needed */ }
+
+      } catch (err) {
+        console.error("Updater check failed:", err);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, []);
+
+  return (
+    <div>
+      {/* …your app UI… */}
+      {updateProgress !== null && (
+        <div style={{ position: "fixed", bottom: 12, right: 12 }}>
+          Updating… {updateProgress.toFixed(0)}%
+        </div>
+      )}
+    </div>
+  );
 
   // THEME state & persistence
   const [theme, setTheme] = useState(getInitialTheme());
