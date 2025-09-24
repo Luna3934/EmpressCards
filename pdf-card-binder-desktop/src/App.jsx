@@ -82,7 +82,8 @@ function ThemeToggle({ theme, setTheme }) {
 // ---------- Utilities ----------
 async function renderPdfPageToDataUrl(arrayBuffer, pageNumber = 1, scale = 0.9) {
   const pdf = await getDocument({ data: arrayBuffer }).promise;
-  const page = await pdf.getPage(pageNumber);
+  const pn = Math.max(1, Math.min(pdf.numPages, Number(pageNumber) || 1));
+  const page = await pdf.getPage(pn);
   const viewport = page.getViewport({ scale });
   const canvas = document.createElement("canvas");
   const ctx = canvas.getContext("2d");
@@ -293,6 +294,143 @@ function Lightbox({ open, onClose, fileBytes, name, theme }) {
     </div>
   );
 }
+
+
+
+function MultiPageLightbox({ open, onClose, fileBytes, name, theme }) {
+  const [pdf, setPdf] = React.useState(null);
+  const [numPages, setNumPages] = React.useState(1);
+  const [scale, setScale] = React.useState("fit");
+  const canvasesRef = React.useRef([]);
+  const containerRef = React.useRef(null);
+  const headerRef = React.useRef(null);
+  const isDark = theme === "dark";
+
+  // make default view slightly larger
+  const FIT_PAD_X = 30;  // was 120
+  const FIT_PAD_Y = 50;  // was 120
+
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!open || !fileBytes) return;
+      try {
+        const doc = await getDocument({ data: fileBytes }).promise;
+        if (cancelled) return;
+        canvasesRef.current = [];
+        setPdf(doc);
+        setNumPages(doc.numPages);
+        setScale("fit");
+      } catch (e) {
+        console.error("Failed to open PDF", e);
+      }
+    })();
+    return () => { cancelled = true; setPdf(null); };
+  }, [open, fileBytes]);
+
+  const fitScale = React.useCallback(async () => {
+    if (!pdf) return 1;
+    const first = await pdf.getPage(1);
+    const base = first.getViewport({ scale: 1 });
+
+    const hdr  = headerRef.current?.offsetHeight || 0;
+    const availW = (containerRef.current?.clientWidth ?? window.innerWidth) - FIT_PAD_X;
+    const availH = (window.innerHeight - hdr) - FIT_PAD_Y;
+
+    let s = Math.min(availW / base.width, availH / base.height);
+    s = Math.max(0.1, Math.min(s, 6));
+    return s;
+  }, [pdf]);
+
+  const renderOne = React.useCallback(async (pageNo) => {
+    if (!pdf) return;
+    const canvas = canvasesRef.current[pageNo];
+    if (!canvas) return;
+
+    const ctx = canvas.getContext("2d", { alpha: false });
+    const page = await pdf.getPage(pageNo);
+    const s = scale === "fit" ? await fitScale() : Number(scale) || 1;
+    const viewport = page.getViewport({ scale: s });
+
+    canvas.width = Math.round(viewport.width);
+    canvas.height = Math.round(viewport.height);
+    canvas.style.width = `${Math.round(viewport.width)}px`;
+    canvas.style.height = `${Math.round(viewport.height)}px`;
+
+    await page.render({ canvasContext: ctx, viewport }).promise;
+  }, [pdf, scale, fitScale]);
+
+  React.useEffect(() => {
+    if (!pdf || !open) return;
+    let cancelled = false;
+    (async () => {
+      for (let i = 1; i <= numPages && !cancelled; i++) {
+        await renderOne(i);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [pdf, numPages, open, scale, renderOne]);
+
+  React.useEffect(() => {
+    if (!open || scale !== "fit") return;
+    const id = requestAnimationFrame(() => setScale("fit"));
+    return () => cancelAnimationFrame(id);
+  }, [open, numPages, scale]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const onResize = () => { if (scale === "fit") setScale("fit"); };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [open, scale]);
+
+  if (!open) return null;
+
+  const zoomIn  = () => setScale((s) => s === "fit" ? 1.1 : Math.min(Number(s) * 1.1, 6));
+  const zoomOut = () => setScale((s) => s === "fit" ? 0.9 : Math.max(Number(s) / 1.1, 0.1));
+  const set100  = () => setScale(1);
+  const fit     = () => setScale("fit");
+
+  return (
+    <div className="fixed inset-0 bg-black/70 z-50 flex flex-col" onClick={onClose}>
+      <div
+        ref={headerRef}
+        className="px-4 pt-3 pb-2 flex items-center gap-3 text-white select-none"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="font-semibold truncate">{name}</div>
+        <div className="text-sm opacity-80">{numPages} page{numPages > 1 ? "s" : ""}</div>
+        <div className="ml-auto flex items-center gap-2">
+          <button className="px-2 py-1 rounded bg-white/10 hover:bg-white/20" onClick={zoomOut}>–</button>
+          <button className="px-2 py-1 rounded bg-white/10 hover:bg-white/20" onClick={zoomIn}>+</button>
+          <button className="px-2 py-1 rounded bg-white/10 hover:bg-white/20" onClick={fit}>Fit</button>
+          <button className="px-2 py-1 rounded bg-white/10 hover:bg-white/20" onClick={set100}>100%</button>
+          <button className="px-3 py-1 rounded bg-white/10 hover:bg-white/20" onClick={onClose}>Close</button>
+        </div>
+      </div>
+
+      <div
+        ref={containerRef}
+        className="flex-1 overflow-auto px-6 pb-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mx-auto w-max space-y-6">
+          {Array.from({ length: numPages }).map((_, idx) => (
+            <canvas
+              key={idx}
+              ref={(el) => { canvasesRef.current[idx + 1] = el; }}
+              className={`block shadow-2xl rounded ${isDark ? "bg-slate-900" : "bg-white"}`}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+
+
 
 // =====================
 //  NEW REORDER SYSTEM
@@ -991,7 +1129,10 @@ export default function App() {
 
                   <button
                     className={`px-3 py-1 rounded-md border text-red-600 ${isDark ? "border-slate-700" : "border-slate-300"}`}
-                    onClick={() => remove(m.id)}
+                    onClick={() => { 
+                      const msg = `Delete "${m.name || "this card"}"?\nThis will permanently remove the card and its stored PDF.`;
+                      if (window.confirm(msg)) remove(m.id);
+                    }}
                   >
                     Delete
                   </button>
@@ -1376,7 +1517,7 @@ export default function App() {
         </div>
       </main>
 
-      <Lightbox
+      <MultiPageLightbox
         open={lightbox.open}
         onClose={() => setLightbox({ open: false, id: "" })}
         fileBytes={lightboxBytes}
