@@ -12,6 +12,7 @@ const metaStore = localforage.createInstance({ name: "pdf-card-binder-meta" });
 const fileStore = localforage.createInstance({ name: "pdf-card-binder-files" });
 const orderStore = localforage.createInstance({ name: "pdf-card-binder-order" });
 
+
 // ---- Tiers (hardcoded) ----
 const TIER_OPTIONS = [
   "Dawn","Seal","Lotus","Scribe","Eclipse","Celestial",
@@ -39,6 +40,25 @@ const customCollectionStore = localforage.createInstance({
 const THEME_KEY = "pcb-theme"; // 'light' | 'dark'
 const DEBUG_DND = false;
 const d = (...args) => { if (DEBUG_DND) console.log("[DND]", ...args); };
+
+const BACKUP_SCHEMA_VERSION = 2;
+
+function toUint8(raw) {
+  if (!raw) return new Uint8Array();
+  return raw instanceof Uint8Array ? raw : new Uint8Array(raw);
+}
+// Optional: accept future/base64 formats gracefully
+function decodeFileEntry(entry) {
+  if (Array.isArray(entry)) return new Uint8Array(entry);
+  if (typeof entry === "string") {
+    const base64 = entry.includes(",") ? entry.split(",").pop() : entry;
+    const bin = atob(base64);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+  return new Uint8Array();
+}
 
 // ---------- Theme helpers (works regardless of Tailwind darkMode) ----------
 function getInitialTheme() {
@@ -805,44 +825,105 @@ export default function App() {
   }
 
   async function exportJson() {
-    const data = { metas, files: {} };
+    // Gather auxiliary stores
+    const [orderMapOnDisk, customCollectionsOnDisk] = await Promise.all([
+      orderStore.getItem("map").then((m) => m || {}),
+      customCollectionStore.getItem("list").then((l) => (Array.isArray(l) ? l : [])),
+    ]);
+
+    // Collect files keyed by id
+    const files = {};
     for (const m of metas) {
-      const bytes = await fileStore.getItem(m.id);
-      data.files[m.id] = Array.from(bytes || []);
+      const raw = await fileStore.getItem(m.id);
+      const bytes = toUint8(raw);
+      files[m.id] = Array.from(bytes); // store as number array for portability
     }
-    const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
+
+    const backup = {
+      app: "empress-card-binder",
+      schemaVersion: BACKUP_SCHEMA_VERSION,
+      exportedAt: new Date().toISOString(),
+      // core library
+      metas,
+      files,
+      // organization
+      orderMap: orderMapOnDisk,
+      customCollections: customCollectionsOnDisk,
+      // optional niceties: theme
+      theme: theme === "dark" ? "dark" : "light",
+    };
+
+    const blob = new Blob([JSON.stringify(backup)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `pdf-card-binder-export-${new Date().toISOString().slice(0,10)}.json`;
+    a.download = `pdf-card-binder-export-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
   }
 
-  async function importJson(file) {
+
+  async function importJson(file, { mode = "merge" } = {}) {
     const text = await file.text();
-    const data = JSON.parse(text);
-    for (const m of data.metas) {
+    const data = JSON.parse(text || "{}");
+
+    if (mode === "replace") {
+      // Full reset before restore
+      await Promise.all([
+        metaStore.clear(),
+        fileStore.clear(),
+        orderStore.clear(),
+        customCollectionStore.clear(),
+      ]);
+    }
+
+    const importedMetas = Array.isArray(data.metas) ? data.metas : [];
+    for (const m of importedMetas) {
       await metaStore.setItem(m.id, m);
     }
-    for (const [id, arr] of Object.entries(data.files)) {
-      await fileStore.setItem(id, new Uint8Array(arr));
+
+    const importedFiles = data.files || {};
+    for (const [id, entry] of Object.entries(importedFiles)) {
+      await fileStore.setItem(id, decodeFileEntry(entry));
     }
+
+    if (data.orderMap && typeof data.orderMap === "object") {
+      await orderStore.setItem("map", data.orderMap);
+    }
+
+    if (Array.isArray(data.customCollections)) {
+      // de-dup + sort with any built-ins
+      const dedup = Array.from(
+        new Set(data.customCollections.map((c) => String(c)))
+      ).sort((a, b) => a.localeCompare(b));
+      await customCollectionStore.setItem("list", dedup);
+    }
+
+    if (data.theme === "dark" || data.theme === "light") {
+      try { localStorage.setItem(THEME_KEY, data.theme); } catch {}
+    }
+
+    // Reload to rehydrate in-memory state from stores
     window.location.reload();
   }
 
+
   async function safeImportJson(file) {
     try {
-      if (!file.name.toLowerCase().endsWith('.json')) {
-        alert('That looks like a PDF. Use "Add PDFs" or the big drop zone for PDFs. "Restore" is only for JSON backups.');
+      if (!file.name.toLowerCase().endsWith(".json")) {
+        alert('That looks like a PDF. Use "Add PDFs" for PDFs. "Restore" is only for JSON backups.');
         return;
       }
-      await importJson(file);
+      const replace = window.confirm(
+        'Restore backup:\n\nClick "OK" to REPLACE your current library with the backup.\nClick "Cancel" to MERGE the backup into your current library.'
+      );
+      await importJson(file, { mode: replace ? "replace" : "merge" });
     } catch (err) {
-      console.error('Import failed', err);
-      alert('Import failed. Make sure you selected a JSON backup exported from this app.');
+      console.error("Import failed", err);
+      alert("Import failed. Make sure you selected a JSON backup exported from this app.");
     }
   }
+
 
   // ===== moveWithinGroup (pointer + keyboard) =====
   function moveWithinGroup(groupName, draggedId, targetId, placeBefore=true) {
