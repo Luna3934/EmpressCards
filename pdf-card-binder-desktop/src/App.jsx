@@ -3,6 +3,8 @@ import localforage from "localforage";
 import { v4 as uuidv4 } from "uuid";
 import { GlobalWorkerOptions, getDocument } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { check } from '@tauri-apps/plugin-updater'
+import { relaunch } from '@tauri-apps/plugin-process'
 
 // Desktop-safe pdf.js worker (bundled locally for Tauri/Electron)
 GlobalWorkerOptions.workerPort = new Worker(workerUrl, { type: "module" });
@@ -60,6 +62,54 @@ function decodeFileEntry(entry) {
   return new Uint8Array();
 }
 
+function useTauriAutoUpdate(options = {}) {
+  const { promptUser = true, skipInDev = true } = options;
+
+  useEffect(() => {
+    // Only run inside the Tauri desktop app
+    const isTauri = typeof window !== "undefined" && "__TAURI_IPC__" in window;
+    if (!isTauri) return;
+
+    // Optional: don't check during `tauri dev`
+    if (skipInDev && import.meta?.env?.DEV) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        // Lazy-load so the web build doesn't include these
+        const [{ check }, { relaunch }] = await Promise.all([
+          import("@tauri-apps/plugin-updater"),
+          import("@tauri-apps/plugin-process"),
+        ]);
+
+        const update = await check(); // null if none
+        if (!update) return;
+
+        // Optional confirmation dialog
+        if (promptUser) {
+          const { ask } = await import("@tauri-apps/plugin-dialog");
+          const ok = await ask(
+            `A new version (${update.version}) is available. Install now?`,
+            { title: "Update available" }
+          );
+          if (!ok) return;
+        }
+
+        await update.downloadAndInstall(); // you can pass a progress callback here
+        if (!cancelled) await relaunch();  // restarts into the new version
+      } catch (err) {
+        // Never crash the app if updater/config isn’t set up
+        console.debug("[updater] skipped or failed:", err);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [promptUser, skipInDev]);
+}
+
 // ---------- Theme helpers (works regardless of Tailwind darkMode) ----------
 function getInitialTheme() {
   try {
@@ -111,6 +161,14 @@ async function renderPdfPageToDataUrl(arrayBuffer, pageNumber = 1, scale = 0.9) 
   canvas.height = viewport.height;
   await page.render({ canvasContext: ctx, viewport }).promise;
   return { dataUrl: canvas.toDataURL("image/png"), numPages: pdf.numPages };
+}
+
+async function checkForUpdates() {
+  const update = await check()
+  if (update) {
+    await update.downloadAndInstall()
+    await relaunch()
+  }
 }
 
 function useLocalMeta() {
@@ -478,6 +536,8 @@ function orderItemsInGroup(orderMap, groupName, items) {
 
 export default function App() {
   const { metas, loading, upsert, remove } = useLocalMeta();
+
+  useTauriAutoUpdate({ promptUser: true });
 
   // THEME state & persistence
   const [theme, setTheme] = useState(getInitialTheme());
