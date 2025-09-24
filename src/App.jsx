@@ -37,7 +37,7 @@ const customCollectionStore = localforage.createInstance({
 });
 
 // Types
-/** @typedef {{ id: string; name: string; pages: number; tags: string[]; collection?: string; thumbnailDataUrl: string; createdAt: number; updatedAt: number; tier?: string; favorite?: boolean; }} CardMeta */
+/** @typedef {{ id: string; name: string; pages: number; tags: string[]; collection?: string; thumbnailDataUrl: string; createdAt: number; updatedAt: number; tier?: string; favorite?: boolean; kind?: "pdf" | "gif"}} CardMeta */
 
 const THEME_KEY = "pcb-theme"; // 'light' | 'dark'
 const DEBUG_DND = false;
@@ -240,20 +240,24 @@ function DropZone({ onFiles, theme }) {
         const files = Array.from(e.dataTransfer.files).filter((f) => {
           const nameOk = f.name?.toLowerCase().endsWith(".pdf");
           const typeOk = (f.type || "").toLowerCase().includes("pdf");
-          return nameOk || typeOk; // type may be empty on Windows
+          const name = (f.name || "").toLowerCase();
+          const type = (f.type || "").toLowerCase();
+          const isPdf = name.endsWith(".pdf") || type.includes("pdf");
+          const isGif = name.endsWith(".gif") || type === "image/gif";
+          return isPdf || isGif;
         });
         if (files.length) onFiles(files);
       }}
       onClick={() => inputRef.current?.click()}
     >
-      <p className="font-medium">Drop PDF cards here or click to select</p>
+      <p className="font-medium">Drop PDFs or GIFs cards here or click to select</p>
       <p className={`text-xs mt-1 ${isDark ? "text-gray-400" : "text-gray-500"}`}>
         We generate thumbnails and store everything locally in your browser.
       </p>
       <input
         ref={inputRef}
         type="file"
-        accept=".pdf,application/pdf"
+        accept=".pdf,application/pdf,.gif,image/gif"
         multiple
         className="hidden"
         onChange={(e) => {
@@ -508,6 +512,146 @@ function MultiPageLightbox({ open, onClose, fileBytes, name, theme }) {
 }
 
 
+function GifLightbox({ open, onClose, fileBytes, name, theme }) {
+  const [url, setUrl] = React.useState("");
+  const [scale, setScale] = React.useState("fit"); // "fit" or number
+  const [fitTick, setFitTick] = React.useState(0); // bump to recompute fit after layout/load
+  const containerRef = React.useRef(null);
+  const headerRef = React.useRef(null);
+  const imgRef = React.useRef(null);
+  const isDark = theme === "dark";
+
+  // Match MultiPageLightbox padding (so it shows smaller and avoids scrolling)
+  const FIT_PAD_X = 30;
+  const FIT_PAD_Y = 50;
+
+  React.useEffect(() => {
+    if (!open || !fileBytes) return;
+    const blob = new Blob([fileBytes], { type: "image/gif" });
+    const u = URL.createObjectURL(blob);
+    setUrl(u);
+    setScale("fit");
+    // nudge a refit on next frame, after DOM paints
+    requestAnimationFrame(() => setFitTick((t) => t + 1));
+
+    return () => {
+      URL.revokeObjectURL(u);
+      setUrl("");
+    };
+  }, [open, fileBytes]);
+
+  // Refit on window resize
+  React.useEffect(() => {
+    if (!open) return;
+    const onResize = () => {
+      setScale("fit");
+      setFitTick((t) => t + 1);
+      // double-Raf to ensure layout is settled
+      requestAnimationFrame(() => setFitTick((t) => t + 1));
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [open]);
+
+  // Refit if the container itself changes size (scrollbar, flex changes, etc.)
+  React.useEffect(() => {
+    if (!open || !containerRef.current) return;
+    const ro = new ResizeObserver(() => {
+      if (scale === "fit") {
+        setFitTick((t) => t + 1);
+        requestAnimationFrame(() => setFitTick((t) => t + 1));
+      }
+    });
+    ro.observe(containerRef.current);
+    return () => ro.disconnect();
+  }, [open, scale]);
+
+  const applyFit = React.useCallback(() => {
+    const img = imgRef.current;
+    const container = containerRef.current;
+    const hdr = headerRef.current?.offsetHeight || 0;
+    if (!img || !container) return 1;
+
+    const naturalW = img.naturalWidth || 0;
+    const naturalH = img.naturalHeight || 0;
+    if (!naturalW || !naturalH) return 1;
+
+    const availW = (container.clientWidth ?? window.innerWidth) - FIT_PAD_X;
+    const availH = (window.innerHeight - hdr) - FIT_PAD_Y;
+
+    let s = Math.min(availW / naturalW, availH / naturalH);
+    s = Math.max(0.1, Math.min(s, 6)); // same caps as MultiPageLightbox
+    return s;
+  }, []);
+
+  // Ensure we recompute precisely when needed
+  const computedScale = React.useMemo(() => {
+    if (scale === "fit") return applyFit();
+    const k = Number(scale);
+    return Number.isFinite(k) && k > 0 ? Math.min(Math.max(k, 0.1), 6) : 1;
+  }, [scale, applyFit, fitTick, url]); // url/fitTick ensure re-run after load/layout
+
+  const handleImgLoad = React.useCallback(() => {
+    // Fit after the image knows its natural size AND after layout stabilizes
+    setScale("fit");
+    setFitTick((t) => t + 1);
+    requestAnimationFrame(() => setFitTick((t) => t + 1));
+  }, []);
+
+  const zoomIn  = () => setScale((v) => (v === "fit" ? 1.1 : Math.min(Number(v) * 1.1, 6)));
+  const zoomOut = () => setScale((v) => (v === "fit" ? 0.9 : Math.max(Number(v) / 1.1, 0.1)));
+  const set100  = () => setScale(1);
+  const fit     = () => { setScale("fit"); setFitTick((t) => t + 1); };
+
+  // Style the img to the computed width; height auto to preserve aspect
+  const imgStyle = React.useMemo(() => {
+    const naturalW = imgRef.current?.naturalWidth || 0;
+    const w = Math.round(naturalW * (computedScale || 1));
+    return naturalW ? { width: `${w}px`, height: "auto" } : {};
+  }, [computedScale]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/70 z-50 flex flex-col" onClick={onClose}>
+      <div
+        ref={headerRef}
+        className="px-4 pt-3 pb-2 flex items-center gap-3 text-white select-none"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="font-semibold truncate">{name}</div>
+        <div className="ml-auto flex items-center gap-2">
+          <button className="px-2 py-1 rounded bg-white/10 hover:bg-white/20" onClick={zoomOut}>–</button>
+          <button className="px-2 py-1 rounded bg-white/10 hover:bg-white/20" onClick={zoomIn}>+</button>
+          <button className="px-2 py-1 rounded bg-white/10 hover:bg-white/20" onClick={fit}>Fit</button>
+          <button className="px-2 py-1 rounded bg-white/10 hover:bg-white/20" onClick={set100}>100%</button>
+          <button className="px-3 py-1 rounded bg-white/10 hover:bg-white/20" onClick={onClose}>Close</button>
+        </div>
+      </div>
+
+      <div
+        ref={containerRef}
+        className="flex-1 flex items-center justify-center px-6 pb-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className={`shadow-2xl rounded ${isDark ? "bg-slate-900" : "bg-white"} overflow-hidden`}>
+          {url && (
+            <img
+              ref={imgRef}
+              src={url}
+              alt={name}
+              onLoad={handleImgLoad}
+              style={imgStyle}
+              className={`${isDark ? "bg-slate-900" : "bg-white"} block`}
+              draggable={false}
+            />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 
 
@@ -608,6 +752,9 @@ export default function App() {
   const [dropTarget, setDropTarget] = useState({ id:"", pos:null });
   const pointerIdRef = useRef(null);
   const [dropLine, setDropLine] = useState({ groupKey: "", x: 0, top: 0, height: 0, visible: false });
+
+  const [gifState, setGifState] = useState({ open: false, id: "" });
+  const [gifBytes, setGifBytes] = useState(null); 
 
   // remember edit toggle across restarts
   useEffect(() => {
@@ -840,12 +987,44 @@ export default function App() {
         const bytes = new Uint8Array(await file.arrayBuffer());
         const renderBytes = bytes.slice();
 
+        const nameLower = (file.name || "").toLowerCase();
+        const typeLower = (file.type || "").toLowerCase();
+        const isPdf = nameLower.endsWith(".pdf") || typeLower.includes("pdf");
+        const isGif = nameLower.endsWith(".gif") || typeLower === "image/gif";
+        
+        let kind = isGif ? "gif" : "pdf"; // default to pdf if unknown
+
         let dataUrl = "";
         let numPages = 1;
         try {
-          const r = await renderPdfPageToDataUrl(renderBytes, 1, 0.9);
-          dataUrl = r.dataUrl;
-          numPages = r.numPages;
+          if (kind === "pdf") {
+            const r = await renderPdfPageToDataUrl(renderBytes, 1, 0.9);
+            dataUrl = r.dataUrl;
+            numPages = r.numPages;
+          } else {
+            // GIF: make a thumbnail from the first frame
+            const blob = new Blob([renderBytes], { type: "image/gif" });
+            const url = URL.createObjectURL(blob);
+            const img = new Image();
+            await new Promise((res, rej) => {
+              img.onload = res; img.onerror = rej; img.src = url;
+            });
+            const W = 360, H = Math.max(240, Math.round((img.height / img.width) * 360) || 240);
+            const canvas = document.createElement("canvas");
+            canvas.width = W; canvas.height = H;
+            const ctx = canvas.getContext("2d");
+            ctx.fillStyle = "#fff"; ctx.fillRect(0,0,W,H);
+            // contain fit
+            const s = Math.min(W / img.width, H / img.height);
+            const w = Math.round(img.width * s);
+            const h = Math.round(img.height * s);
+            const x = Math.round((W - w) / 2);
+            const y = Math.round((H - h) / 2);
+            ctx.drawImage(img, x, y, w, h);
+            dataUrl = canvas.toDataURL("image/png");
+            URL.revokeObjectURL(url);
+            numPages = 1; // not relevant for GIF
+          }
         } catch (renderErr) {
           console.error("Thumbnail render failed, using placeholder", renderErr);
           const canvas = document.createElement("canvas");
@@ -853,7 +1032,7 @@ export default function App() {
           const ctx = canvas.getContext("2d");
           ctx.fillStyle = "#f1f5f9"; ctx.fillRect(0,0,canvas.width,canvas.height);
           ctx.fillStyle = "#0f172a"; ctx.font = "bold 20px system-ui";
-          ctx.fillText("PDF", 20, 40);
+          ctx.fillText(kind.toUpperCase(), 20, 40);
           ctx.font = "14px system-ui";
           ctx.fillText(file.name.slice(0, 40), 20, 70);
           dataUrl = canvas.toDataURL("image/png");
@@ -870,7 +1049,8 @@ export default function App() {
           createdAt: Date.now(),
           updatedAt: Date.now(),
           tier: "",
-          favorite: false
+          favorite: false,
+          kind,
         };
 
         await fileStore.setItem(id, bytes);
@@ -886,9 +1066,16 @@ export default function App() {
   }
 
   async function openLightbox(id) {
+    const meta = /** @type {CardMeta} */ (await metaStore.getItem(id));
     const bytes = await fileStore.getItem(id);
-    setLightboxBytes(bytes);
-    setLightbox({ open: true, id });
+    // decide viewer by kind
+    if (meta?.kind === "gif") {
+      setGifState({ open: true, id });
+      setGifBytes(bytes);
+    } else {
+      setLightboxBytes(bytes);
+      setLightbox({ open: true, id });
+    }
   }
 
   async function updateMeta(id, patch) {
@@ -1304,6 +1491,7 @@ export default function App() {
                     ${isDark ? "bg-slate-800 border-slate-700" : "bg-gray-50 border-slate-300"}`}>
                     {m.tier || "(No tier)"}
                   </span>
+                  
                 </div>
 
                 {Array.isArray(m.tags) && m.tags.length > 0 && (
@@ -1677,6 +1865,14 @@ export default function App() {
         onClose={() => setLightbox({ open: false, id: "" })}
         fileBytes={lightboxBytes}
         name={metas.find((m) => m.id === lightbox.id)?.name || ""}
+        theme={theme}
+      />
+
+      <GifLightbox
+        open={gifState.open}
+        onClose={() => { setGifState({ open: false, id: "" }); setGifBytes(null); }}
+        fileBytes={gifBytes}
+        name={metas.find((m) => m.id === gifState.id)?.name || ""}
         theme={theme}
       />
 
