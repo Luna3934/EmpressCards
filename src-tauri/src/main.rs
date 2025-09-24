@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    empress_card_collection::run()
+    empire_card_collection::run()
 }
