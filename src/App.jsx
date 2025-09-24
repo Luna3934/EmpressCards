@@ -26,8 +26,8 @@ const TIER_OPTIONS = [
 const DEFAULT_COLLECTIONS = [
   "Dayseal",
   "Everflame Mandate",
-  "First Light - Series I",
-  "Mooncrown Eclipse - Series I",
+  "First Light",
+  "Mooncrown Eclipse",
   "Starseal Registry"
 ];
 
@@ -315,19 +315,26 @@ function Lightbox({ open, onClose, fileBytes, name, theme }) {
         s = Math.max(0.1, Math.min(s, 8));
       }
 
-      const viewport = page.getViewport({ scale: s });
+      // ↑ CSS scale; now render sharper using device pixel ratio
+      const dpr = Math.min(window.devicePixelRatio || 1, 2); // bump to 3 if you want extra crispness
+      const viewport = page.getViewport({ scale: s * dpr });
+
       const canvas = canvasRef.current;
       const ctx = canvas.getContext("2d", { alpha: false });
+
+      // Backing store size in device pixels
       canvas.width = Math.round(viewport.width);
       canvas.height = Math.round(viewport.height);
-      canvas.style.width = `${Math.round(viewport.width)}px`;
-      canvas.style.height = `${Math.round(viewport.height)}px`;
+      // Display size in CSS pixels
+      canvas.style.width = `${Math.round(viewport.width / dpr)}px`;
+      canvas.style.height = `${Math.round(viewport.height / dpr)}px`;
 
       await page.render({ canvasContext: ctx, viewport }).promise;
-      setScale(s);
+      setScale(s); // keep logical (CSS) scale in state
     },
     [pdf]
   );
+
 
   useEffect(() => {
     if (!open || !pdf) return;
@@ -380,7 +387,7 @@ function Lightbox({ open, onClose, fileBytes, name, theme }) {
 
 
 
-function MultiPageLightbox({ open, onClose, fileBytes, name, theme }) {
+function MultiPageLightbox({ open, onClose, fileBytes, name, theme, onPrev, onNext, canPrev, canNext }) {
   const [pdf, setPdf] = React.useState(null);
   const [numPages, setNumPages] = React.useState(1);
   const [scale, setScale] = React.useState("fit");
@@ -388,6 +395,17 @@ function MultiPageLightbox({ open, onClose, fileBytes, name, theme }) {
   const containerRef = React.useRef(null);
   const headerRef = React.useRef(null);
   const isDark = theme === "dark";
+
+  React.useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => {
+      if (e.key === "ArrowRight") { e.preventDefault(); onNext?.(); }
+      if (e.key === "ArrowLeft")  { e.preventDefault(); onPrev?.(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onNext, onPrev]);
+
 
   // make default view slightly larger
   const FIT_PAD_X = 30;  // was 120
@@ -432,16 +450,21 @@ function MultiPageLightbox({ open, onClose, fileBytes, name, theme }) {
 
     const ctx = canvas.getContext("2d", { alpha: false });
     const page = await pdf.getPage(pageNo);
-    const s = scale === "fit" ? await fitScale() : Number(scale) || 1;
-    const viewport = page.getViewport({ scale: s });
 
+    const cssScale = scale === "fit" ? await fitScale() : Number(scale) || 1;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const viewport = page.getViewport({ scale: cssScale * dpr });
+
+    // Backing store size (device px)
     canvas.width = Math.round(viewport.width);
     canvas.height = Math.round(viewport.height);
-    canvas.style.width = `${Math.round(viewport.width)}px`;
-    canvas.style.height = `${Math.round(viewport.height)}px`;
+    // CSS size (logical px)
+    canvas.style.width = `${Math.round(viewport.width / dpr)}px`;
+    canvas.style.height = `${Math.round(viewport.height / dpr)}px`;
 
     await page.render({ canvasContext: ctx, viewport }).promise;
   }, [pdf, scale, fitScale]);
+
 
   React.useEffect(() => {
     if (!pdf || !open) return;
@@ -476,6 +499,31 @@ function MultiPageLightbox({ open, onClose, fileBytes, name, theme }) {
 
   return (
     <div className="fixed inset-0 bg-black/70 z-50 flex flex-col" onClick={onClose}>
+      <button
+        className="absolute left-4 top-1/2 -translate-y-1/2
+                  w-12 h-12 md:w-14 md:h-14
+                  rounded-full text-2xl md:text-3xl leading-none
+                  bg-white/15 hover:bg-white/25 text-white shadow-lg backdrop-blur
+                  flex items-center justify-center
+                  disabled:opacity-40 focus:outline-none focus-visible:ring focus-visible:ring-white/50"
+        onClick={(e) => { e.stopPropagation(); onPrev?.(); }}
+        disabled={!canPrev}
+        aria-label="Previous card"
+      >←</button>
+
+      <button
+        className="absolute right-4 top-1/2 -translate-y-1/2
+                  w-12 h-12 md:w-14 md:h-14
+                  rounded-full text-2xl md:text-3xl leading-none
+                  bg-white/15 hover:bg-white/25 text-white shadow-lg backdrop-blur
+                  flex items-center justify-center
+                  disabled:opacity-40 focus:outline-none focus-visible:ring focus-visible:ring-white/50"
+        onClick={(e) => { e.stopPropagation(); onNext?.(); }}
+        disabled={!canNext}
+        aria-label="Next card"
+      >→</button>
+
+
       <div
         ref={headerRef}
         className="px-4 pt-3 pb-2 flex items-center gap-3 text-white select-none"
@@ -512,7 +560,7 @@ function MultiPageLightbox({ open, onClose, fileBytes, name, theme }) {
 }
 
 
-function GifLightbox({ open, onClose, fileBytes, name, theme }) {
+function GifLightbox({ open, onClose, fileBytes, name, theme, onPrev, onNext, canPrev, canNext }) {
   const [url, setUrl] = React.useState("");
   const [scale, setScale] = React.useState("fit"); // "fit" or number
   const [fitTick, setFitTick] = React.useState(0); // bump to recompute fit after layout/load
@@ -524,6 +572,17 @@ function GifLightbox({ open, onClose, fileBytes, name, theme }) {
   // Match MultiPageLightbox padding (so it shows smaller and avoids scrolling)
   const FIT_PAD_X = 30;
   const FIT_PAD_Y = 50;
+
+  React.useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => {
+      if (e.key === "ArrowRight") { e.preventDefault(); onNext?.(); }
+      if (e.key === "ArrowLeft")  { e.preventDefault(); onPrev?.(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onNext, onPrev]);
+
 
   React.useEffect(() => {
     if (!open || !fileBytes) return;
@@ -579,10 +638,18 @@ function GifLightbox({ open, onClose, fileBytes, name, theme }) {
     const availW = (container.clientWidth ?? window.innerWidth) - FIT_PAD_X;
     const availH = (window.innerHeight - hdr) - FIT_PAD_Y;
 
+    // CSS scale that would visually "fit" the GIF
     let s = Math.min(availW / naturalW, availH / naturalH);
-    s = Math.max(0.1, Math.min(s, 6)); // same caps as MultiPageLightbox
+
+    // Never upscale beyond native pixels on the current display
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    const maxCrispScale = 1 / dpr; // ≤ this keeps 1:1 pixels in device space
+    s = Math.min(s, maxCrispScale);
+
+    s = Math.max(0.1, Math.min(s, 6));
     return s;
   }, []);
+
 
   // Ensure we recompute precisely when needed
   const computedScale = React.useMemo(() => {
@@ -614,6 +681,33 @@ function GifLightbox({ open, onClose, fileBytes, name, theme }) {
 
   return (
     <div className="fixed inset-0 bg-black/70 z-50 flex flex-col" onClick={onClose}>
+
+      <button
+        className="absolute left-4 top-1/2 -translate-y-1/2
+                  w-12 h-12 md:w-14 md:h-14
+                  rounded-full text-2xl md:text-3xl leading-none
+                  bg-white/15 hover:bg-white/25 text-white shadow-lg backdrop-blur
+                  flex items-center justify-center
+                  disabled:opacity-40 focus:outline-none focus-visible:ring focus-visible:ring-white/50"
+        onClick={(e) => { e.stopPropagation(); onPrev?.(); }}
+        disabled={!canPrev}
+        aria-label="Previous card"
+      >←</button>
+
+      <button
+        className="absolute right-4 top-1/2 -translate-y-1/2
+                  w-12 h-12 md:w-14 md:h-14
+                  rounded-full text-2xl md:text-3xl leading-none
+                  bg-white/15 hover:bg-white/25 text-white shadow-lg backdrop-blur
+                  flex items-center justify-center
+                  disabled:opacity-40 focus:outline-none focus-visible:ring focus-visible:ring-white/50"
+        onClick={(e) => { e.stopPropagation(); onNext?.(); }}
+        disabled={!canNext}
+        aria-label="Next card"
+      >→</button>
+
+
+
       <div
         ref={headerRef}
         className="px-4 pt-3 pb-2 flex items-center gap-3 text-white select-none"
@@ -1068,15 +1162,21 @@ export default function App() {
   async function openLightbox(id) {
     const meta = /** @type {CardMeta} */ (await metaStore.getItem(id));
     const bytes = await fileStore.getItem(id);
-    // decide viewer by kind
+
     if (meta?.kind === "gif") {
-      setGifState({ open: true, id });
+      // ensure only one viewer is open
+      setLightbox({ open: false, id: "" });
+      setLightboxBytes(null);
       setGifBytes(bytes);
+      setGifState({ open: true, id });
     } else {
+      setGifState({ open: false, id: "" });
+      setGifBytes(null);
       setLightboxBytes(bytes);
       setLightbox({ open: true, id });
     }
   }
+
 
   async function updateMeta(id, patch) {
     const existing = /** @type {CardMeta} */ (await metaStore.getItem(id));
@@ -1519,6 +1619,29 @@ export default function App() {
 
   const isDark = theme === "dark";
 
+  // --- Navigation helpers (place inside App, before return) ---
+  const navIds = useMemo(() => visibleList.map(m => m.id), [visibleList]);
+
+  function neighborId(id, dir) {
+    if (!id) return null;
+    const i = navIds.indexOf(id);
+    if (i === -1) return null;
+    const j = i + dir;
+    if (j < 0 || j >= navIds.length) return null;
+    return navIds[j];
+  }
+
+  function canPrevId(id) { return neighborId(id, -1) !== null; }
+  function canNextId(id) { return neighborId(id, +1) !== null; }
+
+  async function goSibling(id, dir) {
+    const next = neighborId(id, dir);
+    if (!next) return;
+    // Re-use your existing opener — it picks the right lightbox (pdf/gif)
+    await openLightbox(next);
+  }
+
+
   return (
     <div className={`min-h-screen ${isDark ? "bg-slate-900 text-slate-100" : "bg-white text-slate-900"}`}>
       <header className={`sticky top-0 z-40 backdrop-blur border-b
@@ -1866,6 +1989,10 @@ export default function App() {
         fileBytes={lightboxBytes}
         name={metas.find((m) => m.id === lightbox.id)?.name || ""}
         theme={theme}
+        onPrev={() => goSibling(lightbox.id, -1)}
+        onNext={() => goSibling(lightbox.id, +1)}
+        canPrev={canPrevId(lightbox.id)}
+        canNext={canNextId(lightbox.id)}
       />
 
       <GifLightbox
@@ -1874,7 +2001,12 @@ export default function App() {
         fileBytes={gifBytes}
         name={metas.find((m) => m.id === gifState.id)?.name || ""}
         theme={theme}
+        onPrev={() => goSibling(gifState.id, -1)}
+        onNext={() => goSibling(gifState.id, +1)}
+        canPrev={canPrevId(gifState.id)}
+        canNext={canNextId(gifState.id)}
       />
+
 
       <CollectionsManager
         open={collectionsOpen}
