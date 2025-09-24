@@ -1,5 +1,5 @@
 [package]
-name = "Empress Card Collection"
+name = "Empress_Card_Collection"
 version = "0.1.4"
 description = "A Tauri App"
 authors = ["you"]
