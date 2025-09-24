@@ -1,0 +1,35 @@
+name: Desktop Release
+on:
+  push:
+    tags: ['v*.*.*']   # run when you push a tag like v0.2.0
+  workflow_dispatch:    # lets you run it manually too
+
+jobs:
+  build:
+    runs-on: windows-latest           # NSIS .exe for Windows (simple for users)
+    permissions:
+      contents: write                 # needed to create a GitHub Release
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Build & Release with Tauri
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}                    # e.g. v0.2.0
+          releaseName: Empress Card Binder ${{ github.ref_name }}
+          releaseDraft: false
+          prerelease: false
