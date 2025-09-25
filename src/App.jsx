@@ -1519,7 +1519,7 @@ export default function App() {
                 <div className="flex items-center gap-2 mb-2">
                   <select
                     className={`border rounded-md px-2 py-1 text-sm w-full cursor-pointer
-                      ${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-300"}`}
+                      ${isDark ? "bg-slate-800 border-slate-700 hover:bg-slate-700" : "bg-white border-slate-300 hover:bg-slate-50"}`}
                     value={m.collection || ""}
                     onChange={async (e) => {
                       const val = e.target.value;
@@ -1554,7 +1554,7 @@ export default function App() {
                 <div className="flex items-center gap-2 mb-2">
                   <select
                     className={`border rounded-md px-2 py-1 text-sm w-full cursor-pointer
-                      ${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-300"}`}
+                      ${isDark ? "bg-slate-800 border-slate-700 hover:bg-slate-700" : "bg-white border-slate-300 hover:bg-slate-50"}`}
                     value={m.tier || ""}
                     onChange={(e) => updateMeta(m.id, { tier: e.target.value })}
                   >
@@ -1569,11 +1569,11 @@ export default function App() {
 
                 <div className="flex items-center justify-between mt-3">
                   <div className="flex gap-2">
-                    <button className={`px-3 py-1 rounded-md border cursor-pointer ${isDark ? "border-slate-700 bg-slate-800" : "border-slate-300 bg-white"}`} onClick={() => openLightbox(m.id)}>
+                    <button className={`px-3 py-1 rounded-md border cursor-pointer ${isDark ? "border-slate-700 bg-slate-800 hover:bg-slate-700" : "border-slate-300 bg-white hover:bg-slate-50"}`} onClick={() => openLightbox(m.id)}>
                       View
                     </button>
                     <button
-                      className={`px-3 py-1 rounded-md border cursor-pointer ${isDark ? "border-slate-700 bg-slate-800" : "border-slate-300 bg-white"}`}
+                      className={`px-3 py-1 rounded-md border cursor-pointer ${isDark ? "border-slate-700 bg-slate-800 hover:bg-slate-700" : "border-slate-300 bg-white hover:bg-slate-50"}`}
                       onClick={() => setEditMode(false)}
                       title="Exit edit mode"
                     >
@@ -1582,7 +1582,7 @@ export default function App() {
                   </div>
 
                   <button
-                    className={`px-3 py-1 rounded-md border text-red-600 cursor-pointer ${isDark ? "border-slate-700" : "border-slate-300"}`}
+                    className={`px-3 py-1 rounded-md border text-red-600 cursor-pointer ${isDark ? "border-slate-700 hover:bg-slate-700" : "border-slate-300 hover:bg-slate-50"}`}
                     onClick={() => { 
                       const msg = `Delete "${m.name || "this card"}"?\nThis will permanently remove the card and its stored PDF.`;
                       if (window.confirm(msg)) remove(m.id);
@@ -1618,8 +1618,8 @@ export default function App() {
                 )}
 
                 <div className="flex items-center justify-between mt-3">
-                  <button className={`px-3 py-1 rounded-md border cursor-pointer ${isDark ? "border-slate-700 bg-slate-800" : "border-slate-300 bg-white"}`} onClick={() => openLightbox(m.id)}>View</button>
-                  <button className={`px-3 py-1 rounded-md border cursor-pointer ${isDark ? "border-slate-700 bg-slate-800" : "border-slate-300 bg-white"}`} onClick={() => setEditMode(true)}>Edit</button>
+                  <button className={`px-3 py-1 rounded-md border cursor-pointer ${isDark ? "border-slate-700 bg-slate-800 hover:bg-slate-700" : "border-slate-300 bg-white hover:bg-slate-50"}`} onClick={() => openLightbox(m.id)}>View</button>
+                  <button className={`px-3 py-1 rounded-md border cursor-pointer ${isDark ? "border-slate-700 bg-slate-800 hover:bg-slate-700" : "border-slate-300 bg-white hover:bg-slate-50"}`} onClick={() => setEditMode(true)}>Edit</button>
                 </div>
               </>
             )}
@@ -1668,11 +1668,11 @@ export default function App() {
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search name or tag…"
             className={`flex-1 min-w-[200px] border rounded-xl px-3 py-2 placeholder:text-gray-400 
-              ${isDark ? "bg-slate-800 border-slate-700 text-slate-100" : "bg-white border-slate-300 text-slate-900"}`}
+              ${isDark ? "bg-slate-800 border-slate-700 text-slate-100 hover:bg-slate-700" : "bg-white border-slate-300 text-slate-900 hover:bg-slate-50"}`}
           />
           <select
             className={`border rounded-xl px-3 py-2 cursor-pointer
-              ${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-300"}`}
+              ${isDark ? "bg-slate-800 border-slate-700 hover:bg-slate-700" : "bg-white border-slate-300 hover:bg-slate-50"}`}
             value={activeCollection}
             onChange={(e) => setActiveCollection(e.target.value)}
           >
@@ -1684,7 +1684,7 @@ export default function App() {
 
           <select
             className={`border rounded-xl px-3 py-2 cursor-pointer
-              ${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-300"}`}
+              ${isDark ? "bg-slate-800 border-slate-700 hover:bg-slate-700" : "bg-white border-slate-300 hover:bg-slate-50"}`}
             value={activeTier}
             onChange={(e) => setActiveTier(e.target.value)}
           >
@@ -1696,7 +1696,7 @@ export default function App() {
 
           <select
             className={`border rounded-xl px-3 py-2 cursor-pointer`
-              + ` ${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-300"}`}
+              + ` ${isDark ? "bg-slate-800 border-slate-700 hover:bg-slate-700" : "bg-white border-slate-300 hover:bg-slate-50"}`}
             value={sortMode}
             onChange={(e) => setSortMode(e.target.value)}
             title="Sorting disables folder grouping"
@@ -1714,8 +1714,8 @@ export default function App() {
           <label
             className={`px-3 py-2 rounded-xl border cursor-pointer
               ${favoritesOnly
-                ? (isDark ? "bg-yellow-900/20 border-yellow-700" : "bg-yellow-50 border-yellow-300")
-                : (isDark ? "border-slate-700" : "border-slate-300")}`}
+                ? (isDark ? "bg-yellow-900/20 border-yellow-700 hover:bg-slate-700" : "bg-yellow-50 border-yellow-300 hover:bg-slate-50")
+                : (isDark ? "border-slate-700 hover:bg-slate-700" : "border-slate-300 hover:bg-slate-50")}`}
             title="Show favorites only"
           >
             <input
@@ -1731,7 +1731,7 @@ export default function App() {
             className={`px-3 py-2 rounded-xl border cursor-pointer
               ${editMode
                 ? (isDark ? "bg-blue-900/20 border-blue-700" : "bg-blue-50 border-blue-300")
-                : (isDark ? "border-slate-700" : "border-slate-300")}`}
+                : (isDark ? "border-slate-700 hover:bg-slate-700" : "border-slate-300 hover:bg-slate-50")}`}
             title="Toggle edit mode"
           >
             <input
@@ -1748,7 +1748,7 @@ export default function App() {
               ${sortMode !== "none" ? "opacity-50 cursor-not-allowed" : ""}
               ${reorderMode
                 ? (isDark ? "bg-amber-900/20 border-amber-700" : "bg-amber-50 border-amber-300")
-                : (isDark ? "border-slate-700" : "border-slate-300")}`}
+                : (isDark ? "border-slate-700 hover:bg-slate-700" : "border-slate-300 hover:bg-slate-50")}`}
             title="Drag cards to reorder within each collection (only in Default order view)"
           >
             <input
@@ -1769,7 +1769,7 @@ export default function App() {
             className={`px-3 py-2 rounded-xl border cursor-pointer
               ${bulkMode
                 ? (isDark ? "bg-purple-900/20 border-purple-700" : "bg-purple-50 border-purple-300")
-                : (isDark ? "border-slate-700" : "border-slate-300")}`}
+                : (isDark ? "border-slate-700 hover:bg-slate-700" : "border-slate-300 hover:bg-slate-50")}`}
             title="Select multiple cards to edit at once"
           >
             <input
@@ -1781,48 +1781,55 @@ export default function App() {
             Bulk edit
           </label>
 
-          <button className={`px-3 py-2 rounded-xl border cursor-pointer ${isDark ? "border-slate-700 bg-slate-800" : "border-slate-300 bg-white"}`} onClick={exportJson}>Export</button>
+          <div className="auto flex flex-wrap items-center gap-2">
+            
+            <label className={`px-3 py-2 rounded-xl border cursor-pointer ${isDark ? "border-slate-700 bg-slate-800 hover:bg-slate-700" : "border-slate-300 bg-white hover:bg-slate-50"}`}>
+              Add PDFs
+              <input
+                type="file"
+                accept="application/pdf"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  const files = Array.from(e.target.files ?? []);
+                  if (files.length) importFiles(files);
+                  e.target.value = '';
+                }}
+              />
+            </label>
 
-          <label className={`px-3 py-2 rounded-xl border cursor-pointer ${isDark ? "border-slate-700 bg-slate-800" : "border-slate-300 bg-white"}`}>
-            Add PDFs
-            <input
-              type="file"
-              accept="application/pdf"
-              multiple
-              className="hidden"
-              onChange={(e) => {
-                const files = Array.from(e.target.files ?? []);
-                if (files.length) importFiles(files);
-                e.target.value = '';
-              }}
-            />
-          </label>
+            <button
+              className={`px-3 py-2 rounded-xl border cursor-pointer ${isDark ? "border-slate-700 bg-slate-800 hover:bg-slate-700" : "border-slate-300 bg-white hover:bg-slate-50"}`}
+              onClick={() => setCollectionsOpen(true)}
+            >
+              Manage
+            </button>
 
-          <label className={`px-3 py-2 rounded-xl border cursor-pointer ${isDark ? "border-slate-700 bg-slate-800" : "border-slate-300 bg-white"}`}>
-            Restore
-            <input
-              type="file"
-              accept="application/json"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) safeImportJson(f);
-                e.target.value = '';
-              }}
-            />
-          </label>
+            <button className={`px-3 py-2 rounded-xl border cursor-pointer ${isDark ? "border-slate-700 bg-slate-800 hover:bg-slate-700" : "border-slate-300 bg-white hover:bg-slate-50"}`} onClick={exportJson}>Export</button>
 
-          <button
-            className={`px-3 py-2 rounded-xl border cursor-pointer ${isDark ? "border-slate-700 bg-slate-800" : "border-slate-300 bg-white"}`}
-            onClick={() => setCollectionsOpen(true)}
-          >
-            Manage
-          </button>
+            <label className={`px-3 py-2 rounded-xl border cursor-pointer ${isDark ? "border-slate-700 bg-slate-800 hover:bg-slate-700" : "border-slate-300 bg-white hover:bg-slate-50"}`}>
+              Restore
+              <input
+                type="file"
+                accept="application/json"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) safeImportJson(f);
+                  e.target.value = '';
+                }}
+              />
+            </label>
+
+            
+            
+            <button 
+              className={`px-3 py-2 rounded-xl border cursor-pointer ${isDark ? "border-slate-700 bg-slate-800 hover:bg-slate-700" : "border-slate-300 bg-white hover:bg-slate-50"}`}
+              onClick={manualCheck}>Check for updates
+            </button>
+          </div>
+
           
-          <button 
-            className={`px-3 py-2 rounded-xl border cursor-pointer ${isDark ? "border-slate-700 bg-slate-800" : "border-slate-300 bg-white"}`}
-            onClick={manualCheck}>Check for updates
-          </button>
           
 
           {bulkMode && (
@@ -1830,16 +1837,16 @@ export default function App() {
               <span className="text-sm">
                 Selected: {selectedIds.size} / {visibleList.length}
               </span>
-              <button className={`px-2 py-1 border rounded ${isDark ? "border-slate-700 bg-slate-800" : "border-slate-300 bg-white"}`} onClick={selectAllVisible}>
+              <button className={`px-2 py-1 border rounded ${isDark ? "border-slate-700 bg-slate-800 hover:bg-slate-700" : "border-slate-300 bg-white hover:bg-slate-50"}`} onClick={selectAllVisible}>
                 Select all visible
               </button>
-              <button className={`px-2 py-1 border rounded ${isDark ? "border-slate-700 bg-slate-800" : "border-slate-300 bg-white"}`} onClick={clearSelection}>
+              <button className={`px-2 py-1 border rounded ${isDark ? "border-slate-700 bg-slate-800 hover:bg-slate-700" : "border-slate-300 bg-white hover:bg-slate-50"}`} onClick={clearSelection}>
                 Clear selection
               </button>
 
               {/* Bulk Collection */}
               <select
-                className={`border rounded-xl px-3 py-2 ${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-300"}`}
+                className={`border rounded-xl px-3 py-2 ${isDark ? "bg-slate-800 border-slate-700 hover:bg-slate-700" : "bg-white border-slate-300 hover:bg-slate-50"}`}
                 value={bulkCollection}
                 onChange={async (e) => {
                   const v = e.target.value;
@@ -1875,7 +1882,7 @@ export default function App() {
 
               {/* Bulk Tier */}
               <select
-                className={`border rounded-xl px-3 py-2 ${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-300"}`}
+                className={`border rounded-xl px-3 py-2 ${isDark ? "bg-slate-800 border-slate-700 hover:bg-slate-700" : "bg-white border-slate-300 hover:bg-slate-50"}`}
                 value={bulkTier}
                 onChange={(e) => setBulkTier(e.target.value)}
                 title="Set or clear tier for selected"
@@ -1889,7 +1896,7 @@ export default function App() {
 
               {/* Bulk Favorite */}
               <select
-                className={`border rounded-xl px-3 py-2 ${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-300"}`}
+                className={`border rounded-xl px-3 py-2 ${isDark ? "bg-slate-800 border-slate-700 hover:bg-slate-700" : "bg-white border-slate-300 hover:bg-slate-50"}`}
                 value={bulkFavorite}
                 onChange={(e) => setBulkFavorite(e.target.value)}
                 title="Set or unset favorite for selected"
@@ -1900,7 +1907,7 @@ export default function App() {
               </select>
 
               <button
-                className="px-3 py-2 rounded-xl border bg-blue-600 text-white"
+                className="px-3 py-2 rounded-xl border bg-blue-600 text-white hover:bg-slate-700"
                 onClick={applyBulk}
                 disabled={selectedIds.size === 0}
                 title="Apply selected bulk changes"
@@ -2069,7 +2076,7 @@ function CollectionsManager({ open, onClose, defaults, custom, onDelete, theme }
                 <div key={c} className="flex items-center justify-between text-sm">
                   <span>{c}</span>
                   <button
-                    className={`px-2 py-1 rounded-md border text-red-600 ${isDark ? "border-slate-700 bg-slate-800" : "border-slate-300 bg-white"}`}
+                    className={`px-2 py-1 rounded-md border text-red-600 ${isDark ? "border-slate-700 bg-slate-800 hover:bg-slate-700" : "border-slate-300 bg-white hover:bg-slate-50"}`}
                     onClick={() => onDelete(c)}
                   >
                     Delete
@@ -2136,7 +2143,7 @@ function TagEditor({ value, onChange, theme }) {
       <div className="flex flex-wrap gap-2 mb-2">
         {tags.map((t, i) => (
           <span key={i} className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-sm border
-            ${isDark ? "bg-slate-800 border-slate-700" : "bg-gray-100 border-slate-300"}`}>
+            ${isDark ? "bg-slate-800 border-slate-700 hover:bg-slate-700" : "bg-gray-100 border-slate-300 hover:bg-slate-50"}`}>
             #{t}
             <button className={`${isDark ? "text-gray-400 hover:text-white" : "text-gray-500 hover:text-black"}`} onClick={() => removeTag(i)} aria-label={`remove ${t}`}>×</button>
           </span>
@@ -2156,7 +2163,7 @@ function TagEditor({ value, onChange, theme }) {
             }
           }}
         />
-        <button className={`px-3 py-1 rounded-md border cursor-pointer ${isDark ? "border-slate-700 bg-slate-800" : "border-slate-300 bg-white"}`} onClick={() => addTag(text)}>Add</button>
+        <button className={`px-3 py-1 rounded-md border cursor-pointer ${isDark ? "border-slate-700 bg-slate-800 hover:bg-slate-700" : "border-slate-300 bg-white hover:bg-slate-50"}`} onClick={() => addTag(text)}>Add</button>
       </div>
     </div>
   );
