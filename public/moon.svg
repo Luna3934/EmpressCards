@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <!-- Soft outer glow -->
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feColorMatrix in="blur" type="matrix"
+        values="0 0 0 0 0
+                0 0 0 0 0
+                0 0 0 0 0
+                0 0 0 0.55 0" />
+    </filter>
+
+    <!-- Golden fill -->
+    <radialGradient id="gold" cx="58%" cy="46%" r="70%">
+      <stop offset="0%"  stop-color="#FFE483"/>
+      <stop offset="45%" stop-color="#FFD34D"/>
+      <stop offset="100%" stop-color="#E7B53A"/>
+    </radialGradient>
+
+    <!-- Slight rim highlight on the inner edge -->
+    <radialGradient id="innerLight" cx="42%" cy="46%" r="55%">
+      <stop offset="0%"  stop-color="rgba(255, 253, 230, 0.9)"/>
+      <stop offset="60%" stop-color="rgba(255, 253, 230, 0.2)"/>
+      <stop offset="100%" stop-color="rgba(255, 253, 230, 0)"/>
+    </radialGradient>
+
+    <!-- Mask to carve the crescent: white keeps, black cuts -->
+    <mask id="crescentMask">
+      <rect x="0" y="0" width="256" height="256" fill="black"/>
+      <!-- keep the large circle -->
+      <circle cx="128" cy="128" r="104" fill="white"/>
+      <!-- cut a circle on the right to form the crescent -->
+      <circle cx="160" cy="128" r="110" fill="black"/>
+    </mask>
+  </defs>
+
+  <!-- Outer soft shadow/glow -->
+  <g filter="url(#glow)" opacity="0.9">
+    <circle cx="128" cy="128" r="104" fill="#000000"/>
+  </g>
+
+  <!-- Gold crescent -->
+  <g mask="url(#crescentMask)">
+    <circle cx="128" cy="128" r="104" fill="url(#gold)"/>
+    <!-- subtle inner light to mimic the PNG -->
+    <circle cx="118" cy="128" r="70" fill="url(#innerLight)"/>
+  </g>
+</svg>
