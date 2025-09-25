@@ -3,8 +3,6 @@ import localforage from "localforage";
 import { v4 as uuidv4 } from "uuid";
 import { GlobalWorkerOptions, getDocument } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-import { check } from '@tauri-apps/plugin-updater'
-import { relaunch } from '@tauri-apps/plugin-process'
 
 // Desktop-safe pdf.js worker (bundled locally for Tauri/Electron)
 GlobalWorkerOptions.workerPort = new Worker(workerUrl, { type: "module" });
@@ -62,53 +60,86 @@ function decodeFileEntry(entry) {
   return new Uint8Array();
 }
 
-function useTauriAutoUpdate(options = {}) {
-  const { promptUser = true, skipInDev = true } = options;
+function isTauri() {
+  return typeof window !== "undefined" && "__TAURI_IPC__" in window;
+}
 
+async function manualCheck() {
+  try {
+    if (!isTauri()) {
+      alert("Not running inside the desktop app.");
+      return;
+    }
+
+    const [{ check }, { relaunch }] = await Promise.all([
+      import("@tauri-apps/plugin-updater"),
+      import("@tauri-apps/plugin-process"),
+    ]);
+
+    const update = await check();       // returns null or an object
+    if (!update) {
+      alert("You’re up to date (no update available).");
+      return;
+    }
+
+    // Some versions expose update.available; others return null when none.
+    if (update.available === false) {
+      alert("You’re up to date (available=false).");
+      return;
+    }
+
+    const { ask } = await import("@tauri-apps/plugin-dialog");
+    const ok = await ask(`Install ${update.version}?`, { title: "Update available" });
+    if (!ok) return;
+
+    // Optional: listen to progress events
+    await update.downloadAndInstall((evt) => {
+      // evt: { event: "Started" | "Progress" | "Finished", ... }
+      console.log("[updater]", evt);
+    });
+
+    await relaunch();
+  } catch (e) {
+    console.error("[manualCheck] failed", e);
+    alert(`Update failed: ${String(e?.message || e)}`);
+  }
+}
+
+function useTauriAutoUpdate({ promptUser = true, skipInDev = true } = {}) {
   useEffect(() => {
-    // Only run inside the Tauri desktop app
-    const isTauri = typeof window !== "undefined" && "__TAURI_IPC__" in window;
-    if (!isTauri) return;
-
-    // Optional: don't check during `tauri dev`
+    if (!isTauri()) return;
     if (skipInDev && import.meta?.env?.DEV) return;
 
     let cancelled = false;
 
     (async () => {
       try {
-        // Lazy-load so the web build doesn't include these
         const [{ check }, { relaunch }] = await Promise.all([
           import("@tauri-apps/plugin-updater"),
           import("@tauri-apps/plugin-process"),
         ]);
 
-        const update = await check(); // null if none
-        if (!update) return;
+        const update = await check();
+        if (!update || update.available === false) return;
 
-        // Optional confirmation dialog
+        let proceed = true;
         if (promptUser) {
           const { ask } = await import("@tauri-apps/plugin-dialog");
-          const ok = await ask(
-            `A new version (${update.version}) is available. Install now?`,
-            { title: "Update available" }
-          );
-          if (!ok) return;
+          proceed = await ask(`Install ${update.version}?`, { title: "Update available" });
         }
+        if (!proceed) return;
 
-        await update.downloadAndInstall(); // you can pass a progress callback here
-        if (!cancelled) await relaunch();  // restarts into the new version
+        await update.downloadAndInstall((evt) => console.log("[auto updater]", evt));
+        if (!cancelled) await relaunch();
       } catch (err) {
-        // Never crash the app if updater/config isn’t set up
-        console.debug("[updater] skipped or failed:", err);
+        console.error("[auto updater] failed:", err);
       }
     })();
 
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [promptUser, skipInDev]);
 }
+
 
 // ---------- Theme helpers (works regardless of Tailwind darkMode) ----------
 function getInitialTheme() {
