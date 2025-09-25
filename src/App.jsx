@@ -862,6 +862,44 @@ export default function App() {
   const [gifState, setGifState] = useState({ open: false, id: "" });
   const [gifBytes, setGifBytes] = useState(null); 
 
+  const COLLAPSE_KEY = "pcb-collapsed-groups";
+
+  // collapsed map: { [groupKey]: true|false }
+  const [collapsed, setCollapsed] = useState({});
+
+  const [toast, setToast] = useState({ open: false, message: "", kind: "info" });
+  
+  
+
+  function showToast(message, kind = "info", ms = 2400) {
+    setToast({ open: true, message, kind });
+    window.clearTimeout(showToast._t);
+    showToast._t = window.setTimeout(() => setToast(t => ({ ...t, open: false })), ms);
+  }
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(COLLAPSE_KEY);
+      if (raw) setCollapsed(JSON.parse(raw));
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify(collapsed)); } catch {}
+  }, [collapsed]);
+
+  // you already have keyForCollection(c) defined above – reuse it
+  const isGroupCollapsed = (name) => !!collapsed[keyForCollection(name)];
+  const toggleGroup = (name) =>
+    setCollapsed((prev) => ({ ...prev, [keyForCollection(name)]: !prev[keyForCollection(name)] }));
+
+  const setAllCollapsed = (value, groupNames) => {
+    const next = {};
+    for (const n of groupNames) next[keyForCollection(n)] = value;
+    setCollapsed(next);
+  };
+
+
   // remember edit toggle across restarts
   useEffect(() => {
     const saved = localStorage.getItem("pcb-edit");
@@ -1199,40 +1237,48 @@ export default function App() {
 
   async function exportJson() {
     // Gather auxiliary stores
-    const [orderMapOnDisk, customCollectionsOnDisk] = await Promise.all([
-      orderStore.getItem("map").then((m) => m || {}),
-      customCollectionStore.getItem("list").then((l) => (Array.isArray(l) ? l : [])),
-    ]);
+    try {
+      const [orderMapOnDisk, customCollectionsOnDisk] = await Promise.all([
+        orderStore.getItem("map").then((m) => m || {}),
+        customCollectionStore.getItem("list").then((l) => (Array.isArray(l) ? l : [])),
+      ]);
 
-    // Collect files keyed by id
-    const files = {};
-    for (const m of metas) {
-      const raw = await fileStore.getItem(m.id);
-      const bytes = toUint8(raw);
-      files[m.id] = Array.from(bytes); // store as number array for portability
+      // Collect files keyed by id
+      const files = {};
+      for (const m of metas) {
+        const raw = await fileStore.getItem(m.id);
+        const bytes = toUint8(raw);
+        files[m.id] = Array.from(bytes); // store as number array for portability
+      }
+
+      const backup = {
+        app: "empire-card-collection",
+        schemaVersion: BACKUP_SCHEMA_VERSION,
+        exportedAt: new Date().toISOString(),
+        // core library
+        metas,
+        files,
+        // organization
+        orderMap: orderMapOnDisk,
+        customCollections: customCollectionsOnDisk,
+        // optional niceties: theme
+        theme: theme === "dark" ? "dark" : "light",
+      };
+
+      const blob = new Blob([JSON.stringify(backup)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `pdf-card-binder-export-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      // ✅ feedback
+      showToast("Backup exported and download started.", "success");
+    } catch (err) {
+      console.error("Export failed", err);
+      showToast("Export failed. See console for details.", "error");
     }
-
-    const backup = {
-      app: "empire-card-collection",
-      schemaVersion: BACKUP_SCHEMA_VERSION,
-      exportedAt: new Date().toISOString(),
-      // core library
-      metas,
-      files,
-      // organization
-      orderMap: orderMapOnDisk,
-      customCollections: customCollectionsOnDisk,
-      // optional niceties: theme
-      theme: theme === "dark" ? "dark" : "light",
-    };
-
-    const blob = new Blob([JSON.stringify(backup)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `pdf-card-binder-export-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
   }
 
 
@@ -1781,6 +1827,25 @@ export default function App() {
             Bulk edit
           </label>
 
+          {sortMode === "none" && (
+              <>
+                <button
+                  className={`px-3 py-2 rounded-xl border cursor-pointer ${isDark ? "border-slate-700 bg-slate-800 hover:bg-slate-700" : "border-slate-300 bg-white hover:bg-slate-50"}`}
+                  onClick={() => setAllCollapsed(true, groupedByCollection.map(([n]) => n))}
+                  title="Collapse all collections"
+                >
+                  Collapse all
+                </button>
+                <button
+                  className={`px-3 py-2 rounded-xl border cursor-pointer ${isDark ? "border-slate-700 bg-slate-800 hover:bg-slate-700" : "border-slate-300 bg-white hover:bg-slate-50"}`}
+                  onClick={() => setAllCollapsed(false, groupedByCollection.map(([n]) => n))}
+                  title="Expand all collections"
+                >
+                  Expand all
+                </button>
+              </>
+            )}
+
           <div className="auto flex flex-wrap items-center gap-2">
             
             <label className={`px-3 py-2 rounded-xl border cursor-pointer ${isDark ? "border-slate-700 bg-slate-800 hover:bg-slate-700" : "border-slate-300 bg-white hover:bg-slate-50"}`}>
@@ -1820,7 +1885,6 @@ export default function App() {
                 }}
               />
             </label>
-
             
             
             <button 
@@ -1965,24 +2029,40 @@ export default function App() {
                   <section key={name} className={`border rounded-2xl overflow-hidden ${isDark ? "border-slate-700" : "border-slate-200"}`}>
                     <div className={`px-4 py-2 border-b flex items-center justify-between
                       ${isDark ? "bg-slate-800 border-slate-700" : "bg-gray-50 border-slate-200"}`}>
-                      <h2 className="font-semibold">{name}</h2>
+                      <div className="flex items-center gap-3">
+                        <button
+                          className={`w-7 h-7 rounded-md border flex items-center justify-center
+                            ${isDark ? "border-slate-700 hover:bg-slate-700" : "border-slate-300 hover:bg-slate-100"}`}
+                          onClick={() => toggleGroup(name)}
+                          aria-expanded={!isGroupCollapsed(name)}
+                          aria-controls={`group-${keyForCollection(name)}`}
+                          title={isGroupCollapsed(name) ? "Expand" : "Collapse"}
+                        >
+                          {isGroupCollapsed(name) ? "▸" : "▾"}
+                        </button>
+                        <h2 className="font-semibold">{name}</h2>
+                      </div>
                       <span className={`text-xs ${isDark ? "text-gray-400" : "text-gray-500"}`}>
                         {items.length} item{items.length !== 1 ? "s" : ""}
                       </span>
                     </div>
-                    {(() => {
-                      const gridKey = keyForCollection(name);
-                      return (
-                        <div
-                          className="relative p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4"
-                          data-grid-key={gridKey}
-                        >
-                          {ordered.map(renderCardFactory(ordered))}
 
-                          {/* single vertical drop indicator */}
-                          {reorderMode &&
-                            dropLine.visible &&
-                            dropLine.groupKey === gridKey && (
+                    {isGroupCollapsed(name) ? (
+                      <div id={`group-${keyForCollection(name)}`} className={`px-4 py-3 text-sm ${isDark ? "bg-slate-900" : "bg-white"}`}>
+                        <span className={`${isDark ? "text-gray-400" : "text-gray-600"}`}> (collapsed) </span>
+                      </div>
+                    ) : (
+                      (() => {
+                        const gridKey = keyForCollection(name);
+                        return (
+                          <div
+                            id={`group-${gridKey}`}
+                            className="relative p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4"
+                            data-grid-key={gridKey}
+                          >
+                            {ordered.map(renderCardFactory(ordered))}
+
+                            {reorderMode && dropLine.visible && dropLine.groupKey === gridKey && (
                               <div
                                 className="pointer-events-none absolute z-20"
                                 style={{
@@ -1995,10 +2075,12 @@ export default function App() {
                                 <div className="w-1 h-full rounded-full bg-gradient-to-b from-sky-400 via-indigo-500 to-indigo-600 shadow-[0_0_0_3px_rgba(99,102,241,0.28)]" />
                               </div>
                             )}
-                        </div>
-                      );
-                    })()}
+                          </div>
+                        );
+                      })()
+                    )}
                   </section>
+
                 );
               })}
             </div>
@@ -2039,7 +2121,38 @@ export default function App() {
         onDelete={deleteCustomCollection}
         theme={theme}
       />
+
+      {/* Toast */}
+      <div
+        className={`
+          fixed bottom-4 right-4 z-[100]
+          transition-all duration-200
+          ${toast.open ? "opacity-100 translate-y-0 pointer-events-auto" : "opacity-0 translate-y-2 pointer-events-none"}
+        `}
+        role="status"
+        aria-live="polite"
+      >
+        <div className={`
+          px-3 py-2 rounded-xl border shadow
+          ${isDark
+            ? "bg-slate-900 border-slate-700 text-slate-100"
+            : "bg-white border-slate-300 text-slate-900"}
+          ${toast.kind === "success" ? (isDark ? "ring-1 ring-emerald-700/30" : "ring-1 ring-emerald-300/50") : ""}
+          ${toast.kind === "error"   ? (isDark ? "ring-1 ring-rose-700/30"    : "ring-1 ring-rose-300/50")    : ""}
+          ${toast.kind === "info"    ? (isDark ? "ring-1 ring-slate-600/30"   : "ring-1 ring-slate-300/50")   : ""}
+        `}>
+          <span className="mr-2">
+            {toast.kind === "success" ? "✅" : toast.kind === "error" ? "⚠️" : "ℹ️"}
+          </span>
+          <span className="align-middle">{toast.message}</span>
+        </div>
+      </div>
+
+
     </div>
+
+    
+
   );
 }
 
