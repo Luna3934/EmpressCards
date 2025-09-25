@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read       # build job
+  contents: write       # build job
   # publish job below requests write
 
 jobs:
