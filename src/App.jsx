@@ -1867,7 +1867,7 @@ export default function App() {
       <header className={`sticky top-0 z-40 backdrop-blur border-b
          ${isDark ? "bg-slate-900/90 border-slate-800" : "bg-white/90 border-slate-200"}`}>
         <div className="max-w-6xl mx-auto p-4 flex flex-wrap items-center gap-3">
-          <h1 className="text-2xl font-bold">Empire Card Collection v25</h1>
+          <h1 className="text-2xl font-bold">Empire Card Collection</h1>
 
           <ThemeToggle theme={theme} setTheme={setTheme} />
 
@@ -2054,12 +2054,12 @@ export default function App() {
               onClick={manualCheck}>Check for updates
             </button>
 
-            <button
+            {/* <button
               className={`px-3 py-2 rounded-xl border cursor-pointer ${isDark ? "border-slate-700 bg-slate-800 hover:bg-slate-700" : "border-slate-300 bg-white hover:bg-slate-50"}`}
               onClick={() => setDebugOpen(true)}
             >
               Debug
-            </button>
+            </button> */}
           </div>
 
           
