@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-13]   # pin mac for stability
+        os: [windows-latest, macos-13]   # macOS pinned for stability
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -28,23 +28,35 @@ jobs:
       - run: npm ci
       - run: npm run build
 
-      # 🔧 Build ONLY (no release/upload here)
-      - name: Build Tauri
+      # 🟦 Windows: build MSI + updater artifacts
+      - name: Build Tauri (Windows)
+        if: runner.os == 'Windows'
         uses: tauri-apps/tauri-action@v0
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          # remove tagName/releaseName/releaseDraft/prerelease -> this prevents per-OS uploads
-          args: ""   # optional extra cargo args
+          bundles: msi updater
+          args: --verbose
+
+      # 🍏 macOS: build updater only (skip DMG to avoid bundle_dmg.sh)
+      - name: Build Tauri (macOS updater only)
+        if: runner.os == 'macOS'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_BUNDLER_DEBUG: "1"
+        with:
+          bundles: updater
+          args: --verbose
 
       # 📦 Stash outputs for the publish job
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: app-${{ runner.os }}
-          path: |
-            src-tauri/target/release/bundle/**/*
+          path: src-tauri/target/release/bundle/**/*
           if-no-files-found: warn
 
   publish:
@@ -60,7 +72,7 @@ jobs:
       - name: List files (debug)
         run: ls -R dist
 
-      # 🏷️ Create/update the Release and upload everything
+      # 🏷️ Create/update the Release and upload everything the updater needs
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -69,20 +81,25 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            dist/**/bundle/**/Empire*.dmg
-            dist/**/bundle/**/Empire*.app.tar.gz
-            dist/**/bundle/**/Empire*.sig
+            # updater manifest (all platforms read this)
+            dist/**/bundle/**/latest.json
+
+            # macOS updater payload
+            dist/**/bundle/macos/*.app.tar.gz
+            dist/**/bundle/macos/*.app.tar.gz.sig
+
+            # Windows updater payload
+            dist/**/bundle/windows/*.msi.zip
+            dist/**/bundle/windows/*.msi.zip.sig
+
+            # Linux updater payload (if/when you build Linux)
+            dist/**/bundle/linux/*.AppImage.tar.gz
+            dist/**/bundle/linux/*.AppImage.tar.gz.sig
+
+            # Optional human installers (nice-to-have, not needed for auto-update)
             dist/**/bundle/**/Empire*.msi
+            dist/**/bundle/**/Empire*.dmg
             dist/**/bundle/**/Empire*.AppImage
-            dist/**/bundle/**/latest.json
-            dist/**/bundle/**/latest.json
-
-            dist/**/bundle/**/macos/*.app.tar.gz.sig
-            dist/**/bundle/**/windows/*.msi.zip
-            dist/**/bundle/**/windows/*.msi.zip.sig
-            dist/**/bundle/**/linux/*.AppImage.tar.gz
-            dist/**/bundle/**/linux/*.AppImage.tar.gz.sig
-
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
