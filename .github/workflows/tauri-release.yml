@@ -74,6 +74,15 @@ jobs:
             dist/**/bundle/**/Empire*.sig
             dist/**/bundle/**/Empire*.msi
             dist/**/bundle/**/Empire*.AppImage
+            dist/**/bundle/**/latest.json
+            dist/**/bundle/**/latest.json
+
+            dist/**/bundle/**/macos/*.app.tar.gz.sig
+            dist/**/bundle/**/windows/*.msi.zip
+            dist/**/bundle/**/windows/*.msi.zip.sig
+            dist/**/bundle/**/linux/*.AppImage.tar.gz
+            dist/**/bundle/**/linux/*.AppImage.tar.gz.sig
+
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
