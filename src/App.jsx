@@ -43,6 +43,34 @@ const d = (...args) => { if (DEBUG_DND) console.log("[DND]", ...args); };
 
 const BACKUP_SCHEMA_VERSION = 2;
 
+// ---- Debug (no DevTools needed) ----
+const DEBUG_BUFFER_KEY = "pcb-debug-buffer";
+const MAX_DEBUG_LINES = 300;
+
+function readDebugBuffer() {
+  try { return JSON.parse(localStorage.getItem(DEBUG_BUFFER_KEY) || "[]"); }
+  catch { return []; }
+}
+function pushDebugLine(line) {
+  try {
+    const arr = readDebugBuffer();
+    arr.push(line);
+    if (arr.length > MAX_DEBUG_LINES) arr.splice(0, arr.length - MAX_DEBUG_LINES);
+    localStorage.setItem(DEBUG_BUFFER_KEY, JSON.stringify(arr));
+    window.dispatchEvent(new CustomEvent("pcb-debug-buffer-updated", { detail: arr }));
+  } catch {}
+}
+function dbg(tag, ...args) {
+  const ts = new Date().toISOString().split("T")[1].replace("Z", "");
+  const msg = args.map(a => {
+    if (a instanceof Error) return `${a.name}: ${a.message}`;
+    if (typeof a === "string") return a;
+    try { return JSON.stringify(a); } catch { return String(a); }
+  }).join(" ");
+  pushDebugLine(`[${ts}] [${tag}] ${msg}`);
+}
+
+
 function toUint8(raw) {
   if (!raw) return new Uint8Array();
   return raw instanceof Uint8Array ? raw : new Uint8Array(raw);
@@ -61,84 +89,177 @@ function decodeFileEntry(entry) {
 }
 
 function isTauri() {
-  return typeof window !== "undefined" && "__TAURI_IPC__" in window;
+  if (typeof window === "undefined") return false;
+  // v1/v2 friendly: check multiple internals + UA fallback
+  const g = window;
+  return !!(
+    g.__TAURI__ ||
+    g.__TAURI_IPC__ ||
+    g.__TAURI_METADATA__ ||
+    g.__TAURI_INTERNALS__ ||
+    (typeof navigator !== "undefined" && navigator.userAgent?.includes("Tauri"))
+  );
 }
 
 async function manualCheck() {
-  try {
-    if (!isTauri()) {
-      alert("Not running inside the desktop app.");
-      return;
-    }
+  const envInfo = { dev: !!import.meta?.env?.DEV, tauri: isTauri(), origin: location?.origin };
+  dbg("updater", "manualCheck: start", envInfo);
 
-    const [{ check }, { relaunch }] = await Promise.all([
+  // Load plugins
+  let updaterMod, processMod;
+  try {
+    [updaterMod, processMod] = await Promise.all([
       import("@tauri-apps/plugin-updater"),
       import("@tauri-apps/plugin-process"),
     ]);
+    dbg("updater", "manualCheck: plugins loaded", {
+      updaterKeys: Object.keys(updaterMod || {}),
+      processKeys: Object.keys(processMod || {}),
+    });
+  } catch (e) {
+    dbg("updater", "manualCheck: plugin load FAILED", {
+      message: e?.message || String(e),
+      name: e?.name,
+      stack: e?.stack,
+    });
+    alert("Updater plugins not available.");
+    return;
+  }
 
-    const update = await check();       // returns null or an object
-    if (!update) {
+  // Optional safety: you can keep or remove this isTauri gate
+  if (!isTauri()) {
+    dbg("updater", "manualCheck: not tauri -> abort");
+    alert("Not running inside the desktop app.");
+    return;
+  }
+
+  try {
+    dbg("updater", "manualCheck: check() begin");
+    const update = await updaterMod.check();
+    dbg("updater", "manualCheck: check() done", {
+      gotObject: !!update,
+      available: update ? update.available !== false : null,
+      version: update?.version,
+    });
+
+    // If we got here without throwing, the manifest request was attempted successfully.
+    if (!update || update.available === false) {
+      dbg("updater", "manualCheck: no update");
       alert("You’re up to date (no update available).");
-      return;
-    }
-
-    // Some versions expose update.available; others return null when none.
-    if (update.available === false) {
-      alert("You’re up to date (available=false).");
       return;
     }
 
     const { ask } = await import("@tauri-apps/plugin-dialog");
     const ok = await ask(`Install ${update.version}?`, { title: "Update available" });
+    dbg("updater", "manualCheck: user decision", ok);
     if (!ok) return;
 
-    // Optional: listen to progress events
     await update.downloadAndInstall((evt) => {
-      // evt: { event: "Started" | "Progress" | "Finished", ... }
-      console.log("[updater]", evt);
+      // evt: { event: "Started"|"Progress"|"Finished", downloaded?, contentLength? }
+      dbg("updater", "manualCheck: progress", evt);
+      try { window.dispatchEvent(new CustomEvent("pcb-update-progress", { detail: evt })); } catch {}
     });
 
-    await relaunch();
+    dbg("updater", "manualCheck: relaunch");
+    await processMod.relaunch();
   } catch (e) {
-    console.error("[manualCheck] failed", e);
+    // If latest.json/network fails, it usually lands here.
+    dbg("updater", "manualCheck: ERROR", {
+      message: e?.message || String(e),
+      name: e?.name,
+      stack: e?.stack,
+      // Some environments provide extra fields:
+      code: e?.code,
+      status: e?.status,
+      cause: e?.cause ? (e.cause.message || String(e.cause)) : undefined,
+    });
     alert(`Update failed: ${String(e?.message || e)}`);
   }
 }
 
 function useTauriAutoUpdate({ promptUser = true, skipInDev = true } = {}) {
   useEffect(() => {
-    if (!isTauri()) return;
-    if (skipInDev && import.meta?.env?.DEV) return;
+    const envInfo = { dev: !!import.meta?.env?.DEV, tauri: isTauri() };
+
+    if (!isTauri()) { dbg("updater", "auto: not tauri; skip", envInfo); return; }
+    if (skipInDev && import.meta?.env?.DEV) { dbg("updater", "auto: dev; skip", envInfo); return; }
 
     let cancelled = false;
+    dbg("updater", "auto: start", envInfo);
 
     (async () => {
+      // Load plugins
+      let updaterMod, processMod;
       try {
-        const [{ check }, { relaunch }] = await Promise.all([
+        [updaterMod, processMod] = await Promise.all([
           import("@tauri-apps/plugin-updater"),
           import("@tauri-apps/plugin-process"),
         ]);
+        dbg("updater", "auto: plugins loaded", {
+          updaterKeys: Object.keys(updaterMod || {}),
+          processKeys: Object.keys(processMod || {}),
+        });
+      } catch (e) {
+        dbg("updater", "auto: plugin load FAILED", {
+          message: e?.message || String(e),
+          name: e?.name,
+          stack: e?.stack,
+        });
+        return;
+      }
 
-        const update = await check();
-        if (!update || update.available === false) return;
+      try {
+        dbg("updater", "auto: check() begin");
+        const update = await updaterMod.check();
+        dbg("updater", "auto: check() done", {
+          gotObject: !!update,
+          available: update ? update.available !== false : null,
+          version: update?.version,
+        });
+
+        if (!update || update.available === false) {
+          dbg("updater", "auto: no update");
+          return;
+        }
 
         let proceed = true;
         if (promptUser) {
           const { ask } = await import("@tauri-apps/plugin-dialog");
           proceed = await ask(`Install ${update.version}?`, { title: "Update available" });
+          dbg("updater", "auto: user decision", proceed);
         }
         if (!proceed) return;
 
-        await update.downloadAndInstall((evt) => console.log("[auto updater]", evt));
-        if (!cancelled) await relaunch();
+        await update.downloadAndInstall((evt) => {
+          dbg("updater", "auto: progress", evt);
+          try { window.dispatchEvent(new CustomEvent("pcb-update-progress", { detail: evt })); } catch {}
+        });
+
+        if (!cancelled) {
+          dbg("updater", "auto: relaunch");
+          await processMod.relaunch();
+        } else {
+          dbg("updater", "auto: skipped relaunch (cancelled)");
+        }
       } catch (err) {
-        console.error("[auto updater] failed:", err);
+        // Network/manifest errors or install errors land here
+        dbg("updater", "auto: ERROR", {
+          message: err?.message || String(err),
+          name: err?.name,
+          stack: err?.stack,
+          code: err?.code,
+          status: err?.status,
+          cause: err?.cause ? (err.cause.message || String(err.cause)) : undefined,
+        });
       }
     })();
 
-    return () => { cancelled = true; };
+    return () => { cancelled = true; dbg("updater", "auto: cleanup"); };
   }, [promptUser, skipInDev]);
 }
+
+
+
 
 
 // ---------- Theme helpers (works regardless of Tailwind darkMode) ----------
@@ -803,6 +924,24 @@ export default function App() {
 
   useTauriAutoUpdate({ promptUser: true, skipInDev: true });
 
+  useEffect(() => {
+    function onEvt(e) {
+      const evt = e.detail;
+      if (evt?.event === "Progress" && evt?.contentLength) {
+        const pct = Math.max(0, Math.min(100, Math.round((evt.bytesDownloaded / evt.contentLength) * 100)));
+        setUpdateProgress({ pct, ...evt });
+      } else if (evt?.event === "Started") {
+        setUpdateProgress({ pct: 0 });
+      } else if (evt?.event === "Finished") {
+        setUpdateProgress({ pct: 100 });
+        setTimeout(() => setUpdateProgress(null), 1000);
+      }
+    }
+    window.addEventListener("pcb-update-progress", onEvt);
+    return () => window.removeEventListener("pcb-update-progress", onEvt);
+  }, []);
+
+
   // THEME state & persistence
   const [theme, setTheme] = useState(getInitialTheme());
   useEffect(() => {
@@ -868,6 +1007,29 @@ export default function App() {
   const [collapsed, setCollapsed] = useState({});
 
   const [toast, setToast] = useState({ open: false, message: "", kind: "info" });
+
+  // in App()
+  const [debugOpen, setDebugOpen] = useState(false);
+  const [debugLines, setDebugLines] = useState(readDebugBuffer());
+  useEffect(() => {
+    const onBuf = (e) => setDebugLines(Array.isArray(e.detail) ? e.detail : readDebugBuffer());
+    window.addEventListener("pcb-debug-buffer-updated", onBuf);
+    return () => window.removeEventListener("pcb-debug-buffer-updated", onBuf);
+  }, []);
+  function clearDebug() {
+    localStorage.removeItem(DEBUG_BUFFER_KEY);
+    setDebugLines([]);
+  }
+  function exportDebug() {
+    const blob = new Blob([debugLines.join("\n")], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `empire-debug-${new Date().toISOString().replace(/[:.]/g,"-")}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   
   
 
@@ -1891,6 +2053,13 @@ export default function App() {
               className={`px-3 py-2 rounded-xl border cursor-pointer ${isDark ? "border-slate-700 bg-slate-800 hover:bg-slate-700" : "border-slate-300 bg-white hover:bg-slate-50"}`}
               onClick={manualCheck}>Check for updates
             </button>
+
+            <button
+              className={`px-3 py-2 rounded-xl border cursor-pointer ${isDark ? "border-slate-700 bg-slate-800 hover:bg-slate-700" : "border-slate-300 bg-white hover:bg-slate-50"}`}
+              onClick={() => setDebugOpen(true)}
+            >
+              Debug
+            </button>
           </div>
 
           
@@ -2085,6 +2254,34 @@ export default function App() {
               })}
             </div>
           )}
+
+          {debugOpen && (
+            <div className="fixed bottom-4 left-4 right-4 md:left-auto md:right-4 md:w-[min(640px,90vw)] z-[100]">
+              <div className={`rounded-xl border p-3 shadow ${isDark ? "bg-slate-900 border-slate-700 text-slate-100" : "bg-white border-slate-300 text-slate-900"}`}>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="font-semibold">Debug</div>
+                  <div className="flex gap-2">
+                    <button className={`px-2 py-1 rounded border ${isDark ? "border-slate-700" : "border-slate-300"}`} onClick={exportDebug}>Export</button>
+                    <button className={`px-2 py-1 rounded border ${isDark ? "border-slate-700" : "border-slate-300"}`} onClick={clearDebug}>Clear</button>
+                    <button className={`px-2 py-1 rounded border ${isDark ? "border-slate-700" : "border-slate-300"}`} onClick={() => setDebugOpen(false)}>Close</button>
+                  </div>
+                </div>
+                <div className={`h-56 overflow-auto text-xs font-mono whitespace-pre-wrap ${isDark ? "bg-slate-950/40" : "bg-slate-50"} rounded p-2`}>
+                  {debugLines.length ? debugLines.map((l, i) => <div key={i}>{l}</div>) : "No debug messages yet."}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {updateProgress && (
+            <div className="max-w-6xl mx-auto mt-3 px-4">
+              <div className={`rounded-xl border px-4 py-2 text-sm ${isDark ? "bg-slate-900 border-slate-700" : "bg-white border-slate-300"}`}>
+                Updating… {Number.isFinite(updateProgress.pct) ? `${updateProgress.pct}%` : ""}
+              </div>
+            </div>
+          )}
+
+
         </div>
       </main>
 
