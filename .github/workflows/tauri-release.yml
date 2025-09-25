@@ -17,53 +17,6 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-
-      - run: npm ci
-      - run: npm run build
-
-      # 🟦 Windows: build MSI (also produces updater .msi.zip + .sig)
-      - name: Build Tauri (Windows MSI)
-        if: runner.os == 'Windows'
-        uses: tauri-apps/tauri-action@v0
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        with:
-          args: --bundles msi --verbose
-
-      # 🍏 macOS: build .app only (skips DMG; still produces .app.tar.gz + .sig for updater)
-      - name: Build Tauri (macOS app only)
-        if: runner.os == 'macOS'
-        uses: tauri-apps/tauri-action@v0
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        with:
-          args: --bundles app --verbose
-
-      # 📦 Stash outputs for the publish job
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-${{ runner.os }}
-          path: src-tauri/target/release/bundle/**/*
-          if-no-files-found: warn
-
-  publish:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write            # needed to create/update Release & upload
-
-    steps:
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -71,17 +24,49 @@ jobs:
       - name: List files (debug)
         run: ls -R dist
 
-      # 🏷️ Create/update the Release and upload everything the updater & users need
+      # NEW: merge all platform manifests into one latest.json
+      - name: Merge updater manifests
+        shell: node
+        run: |
+          const fs = require('fs');
+          const path = require('path');
+
+          // find every latest.json we downloaded from the matrix
+          function walk(dir, out=[]) {
+            for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+              const p = path.join(dir, e.name);
+              if (e.isDirectory()) walk(p, out);
+              else if (e.isFile() && e.name === 'latest.json') out.push(p);
+            }
+            return out;
+          }
+
+          const files = walk('dist');
+          if (!files.length) throw new Error('No latest.json files found under dist/**');
+
+          const merged = { version: '', notes: '', platforms: {} };
+          for (const f of files) {
+            const j = JSON.parse(fs.readFileSync(f, 'utf8'));
+            if (!merged.version) merged.version = j.version;
+            if (!merged.notes && j.notes) merged.notes = j.notes;
+            Object.assign(merged.platforms, j.platforms || {});
+          }
+
+          const outPath = path.join('dist', 'latest.json');
+          fs.writeFileSync(outPath, JSON.stringify(merged, null, 2));
+          console.log('Merged platforms:', Object.keys(merged.platforms));
+
+      # Publish GitHub Release (upload merged latest.json + payloads)
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}             # v0.2.0
+          tag_name: ${{ github.ref_name }}
           name: Empress Card Binder ${{ github.ref_name }}
           draft: false
           prerelease: false
           files: |
-            # updater manifest (app reads this)
-            dist/**/bundle/**/latest.json
+            # merged updater manifest (must be single file)
+            dist/latest.json
 
             # macOS updater payload
             dist/**/bundle/macos/*.app.tar.gz
@@ -91,21 +76,9 @@ jobs:
             dist/**/bundle/windows/*.msi.zip
             dist/**/bundle/windows/*.msi.zip.sig
 
-            # Optional human installers (nice-to-have)
+            # Optional human installers
             dist/**/bundle/**/Empire*.msi
             dist/**/bundle/**/Empire*.dmg
             dist/**/bundle/**/Empire*.AppImage
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # 🔁 Optional: retry in case of transient upload hiccups
-      - name: Retry missed uploads (best-effort)
-        if: failure()
-        run: |
-          set -e
-          for i in 1 2 3 4; do
-            gh release upload "${GITHUB_REF_NAME}" dist/**/bundle/**/* --clobber && exit 0 || sleep $((i*10))
-          done
-          echo "Upload still failing after retries" && exit 1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
