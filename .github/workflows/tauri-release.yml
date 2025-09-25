@@ -2,19 +2,20 @@ name: Desktop Release
 
 on:
   push:
-    tags: ['v*.*.*']             # e.g. v0.2.0
+    tags: ['v*.*.*']       # e.g. v0.2.0
   workflow_dispatch:
 
 permissions:
-  contents: read                 # default; publish job sets write
+  contents: read           # publish job sets write
 
 jobs:
   build:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-13]   # macOS pinned for stability
+        os: [windows-latest, macos-13]   # pin mac for stability
     runs-on: ${{ matrix.os }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -28,28 +29,25 @@ jobs:
       - run: npm ci
       - run: npm run build
 
-      # 🟦 Windows: build MSI + updater artifacts
-      - name: Build Tauri (Windows)
+      # 🟦 Windows: build MSI (also produces updater .msi.zip + .sig)
+      - name: Build Tauri (Windows MSI)
         if: runner.os == 'Windows'
         uses: tauri-apps/tauri-action@v0
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          bundles: msi updater
-          args: --verbose
+          args: --bundles msi --verbose
 
-      # 🍏 macOS: build updater only (skip DMG to avoid bundle_dmg.sh)
-      - name: Build Tauri (macOS updater only)
+      # 🍏 macOS: build .app only (skips DMG; still produces .app.tar.gz + .sig for updater)
+      - name: Build Tauri (macOS app only)
         if: runner.os == 'macOS'
         uses: tauri-apps/tauri-action@v0
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          TAURI_BUNDLER_DEBUG: "1"
         with:
-          bundles: updater
-          args: --verbose
+          args: --bundles app --verbose
 
       # 📦 Stash outputs for the publish job
       - name: Upload artifacts
@@ -64,6 +62,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write            # needed to create/update Release & upload
+
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -72,7 +71,7 @@ jobs:
       - name: List files (debug)
         run: ls -R dist
 
-      # 🏷️ Create/update the Release and upload everything the updater needs
+      # 🏷️ Create/update the Release and upload everything the updater & users need
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -81,7 +80,7 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            # updater manifest (all platforms read this)
+            # updater manifest (app reads this)
             dist/**/bundle/**/latest.json
 
             # macOS updater payload
@@ -92,11 +91,7 @@ jobs:
             dist/**/bundle/windows/*.msi.zip
             dist/**/bundle/windows/*.msi.zip.sig
 
-            # Linux updater payload (if/when you build Linux)
-            dist/**/bundle/linux/*.AppImage.tar.gz
-            dist/**/bundle/linux/*.AppImage.tar.gz.sig
-
-            # Optional human installers (nice-to-have, not needed for auto-update)
+            # Optional human installers (nice-to-have)
             dist/**/bundle/**/Empire*.msi
             dist/**/bundle/**/Empire*.dmg
             dist/**/bundle/**/Empire*.AppImage
