@@ -195,13 +195,6 @@ async function renderPdfPageToDataUrl(arrayBuffer, pageNumber = 1, scale = 0.9) 
 }
 
 
-async function checkForUpdates() {
-  const update = await check();           // contacts latest.json
-  if (update?.available) {
-    await update.downloadAndInstall();    // downloads, verifies, installs
-    // app will restart on Windows after install
-  }
-}
 
 function useLocalMeta() {
   const [metas, setMetas] = useState(/** @type {CardMeta[]} */([]));
@@ -804,30 +797,6 @@ function orderItemsInGroup(orderMap, groupName, items) {
   return out;
 }
 
-async function manualCheck() {
-  try {
-    const isTauri = typeof window !== "undefined" && "__TAURI_IPC__" in window;
-    if (!isTauri) return;
-
-    const [{ check }, { relaunch }] = await Promise.all([
-      import("@tauri-apps/plugin-updater"),
-      import("@tauri-apps/plugin-process"),
-    ]);
-
-    const update = await check();
-    if (update?.available) {
-      if (confirm(`Update ${update.version} available. Install now?`)) {
-        await update.downloadAndInstall();
-        try { await relaunch(); } catch {}
-      }
-    } else {
-      alert("You’re up to date!");
-    }
-  } catch (e) {
-    console.debug("[manualCheck] skipped/failed:", e);
-  }
-}
-
 export default function App() {
   const { metas, loading, upsert, remove } = useLocalMeta();
   const [updateProgress, setUpdateProgress] = useState(null);
@@ -1178,7 +1147,7 @@ export default function App() {
         const id = uuidv4();
         const meta = {
           id,
-          name: file.name.replace(/\.pdf$/i, ""),
+          name: file.name.replace(/\.(pdf|gif)$/i, ""),
           pages: numPages,
           tags: [],
           collection: "",
