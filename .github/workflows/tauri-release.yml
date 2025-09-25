@@ -2,37 +2,91 @@ name: Desktop Release
 
 on:
   push:
-    tags: ['v*.*.*']       # e.g. v0.2.0
+    tags: ['v*.*.*']   # e.g. v0.2.0
   workflow_dispatch:
 
 permissions:
-  contents: read           # publish job sets write
+  contents: read       # build job
+  # publish job below requests write
 
 jobs:
   build:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-13]   # pin mac for stability
+        os: [windows-latest, macos-13]   # macOS pinned for stability
     runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - run: npm ci
+      - run: npm run build
+
+      # 🟦 Windows: build MSI (+ updater .msi.zip + .sig)
+      - name: Build Tauri (Windows MSI)
+        if: runner.os == 'Windows'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          args: --bundles msi --verbose
+
+      # 🍏 macOS: build .app only (+ updater .app.tar.gz + .sig)
+      - name: Build Tauri (macOS app only)
+        if: runner.os == 'macOS'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          args: --bundles app --verbose
+
+      # 📦 Upload artifacts for publish job
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-${{ runner.os }}
+          path: src-tauri/target/release/bundle/**/*
+          if-no-files-found: error   # fail here if bundling produced nothing
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: dist
 
-      - name: List files (debug)
-        run: ls -R dist
+      - name: Setup Node (for merge step)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
 
-      # NEW: merge all platform manifests into one latest.json
+      - name: List files (debug)
+        run: mkdir -p dist && ls -R dist || true
+
+      # NEW: merge all per-OS latest.json into one file
       - name: Merge updater manifests
-        shell: node
+        shell: bash
         run: |
+          node - <<'JS'
           const fs = require('fs');
           const path = require('path');
 
-          // find every latest.json we downloaded from the matrix
-          function walk(dir, out=[]) {
+          function walk(dir, out = []) {
+            if (!fs.existsSync(dir)) return out;
             for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
               const p = path.join(dir, e.name);
               if (e.isDirectory()) walk(p, out);
@@ -42,30 +96,33 @@ jobs:
           }
 
           const files = walk('dist');
-          if (!files.length) throw new Error('No latest.json files found under dist/**');
+          if (!files.length) {
+            console.error('❌ No latest.json files found under dist/**. Did the build job upload artifacts?');
+            process.exit(1);
+          }
 
           const merged = { version: '', notes: '', platforms: {} };
           for (const f of files) {
             const j = JSON.parse(fs.readFileSync(f, 'utf8'));
-            if (!merged.version) merged.version = j.version;
+            if (!merged.version) merged.version = j.version || '';
             if (!merged.notes && j.notes) merged.notes = j.notes;
             Object.assign(merged.platforms, j.platforms || {});
           }
 
-          const outPath = path.join('dist', 'latest.json');
-          fs.writeFileSync(outPath, JSON.stringify(merged, null, 2));
-          console.log('Merged platforms:', Object.keys(merged.platforms));
+          fs.writeFileSync('dist/latest.json', JSON.stringify(merged, null, 2));
+          console.log('✅ Merged platforms:', Object.keys(merged.platforms));
+          JS
 
-      # Publish GitHub Release (upload merged latest.json + payloads)
+      # 🏷️ Create/update the Release and upload merged manifest + payloads
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}             # v0.1.18
           name: Empress Card Binder ${{ github.ref_name }}
           draft: false
           prerelease: false
           files: |
-            # merged updater manifest (must be single file)
+            # merged manifest (single source of truth)
             dist/latest.json
 
             # macOS updater payload
@@ -82,3 +139,12 @@ jobs:
             dist/**/bundle/**/Empire*.AppImage
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Optional: best-effort retry if an upload hiccups
+      - name: Retry missed uploads (best-effort)
+        if: failure()
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for i in 1 2 3 4; do
