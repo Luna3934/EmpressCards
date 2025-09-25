@@ -925,6 +925,11 @@ export default function App() {
   useTauriAutoUpdate({ promptUser: true, skipInDev: true });
 
   useEffect(() => {
+    ensurePersistentStorage();
+    reportStorage();
+  }, []);
+
+  useEffect(() => {
     function onEvt(e) {
       const evt = e.detail;
       if (evt?.event === "Progress" && evt?.contentLength) {
@@ -1859,6 +1864,29 @@ export default function App() {
     if (!next) return;
     // Re-use your existing opener — it picks the right lightbox (pdf/gif)
     await openLightbox(next);
+  }
+
+  async function ensurePersistentStorage() {
+    try {
+      if (!('storage' in navigator) || !('persist' in navigator.storage)) return;
+      const persisted = await navigator.storage.persisted();
+      if (!persisted) {
+        const granted = await navigator.storage.persist();
+        console.log('[storage] persistent requested:', granted);
+      }
+    } catch (e) {
+      console.log('[storage] persist check failed:', e);
+    }
+  }
+
+  async function reportStorage() {
+    try {
+      if (!('storage' in navigator) || !('estimate' in navigator.storage)) return;
+      const { quota, usage } = await navigator.storage.estimate();
+      console.log('[storage] usage/quota (bytes):', usage, quota);
+    } catch (e) {
+      console.log('[storage] estimate failed:', e);
+    }
   }
 
 
