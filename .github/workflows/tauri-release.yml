@@ -1,24 +1,26 @@
 name: Desktop Release
+
 on:
   push:
-    tags: ['v*.*.*']   # run when you push a tag like v0.2.0
-  workflow_dispatch:    # lets you run it manually too
+    tags: ['v*.*.*']             # e.g. v0.2.0
+  workflow_dispatch:
+
+permissions:
+  contents: read                 # default; publish job sets write
 
 jobs:
   build:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]   # ← add macOS runner
+        os: [windows-latest, macos-13]   # pin mac for stability
     runs-on: ${{ matrix.os }}
-    permissions:
-      contents: write                 # needed to create a GitHub Release
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: 20
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -26,14 +28,63 @@ jobs:
       - run: npm ci
       - run: npm run build
 
-      - name: Build & Release with Tauri
+      # 🔧 Build ONLY (no release/upload here)
+      - name: Build Tauri
         uses: tauri-apps/tauri-action@v0
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.ref_name }}                    # e.g. v0.2.0
-          releaseName: Empress Card Binder ${{ github.ref_name }}
-          releaseDraft: false
+          # remove tagName/releaseName/releaseDraft/prerelease -> this prevents per-OS uploads
+          args: ""   # optional extra cargo args
+
+      # 📦 Stash outputs for the publish job
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-${{ runner.os }}
+          path: |
+            src-tauri/target/release/bundle/**/*
+          if-no-files-found: warn
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write            # needed to create/update Release & upload
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: List files (debug)
+        run: ls -R dist
+
+      # 🏷️ Create/update the Release and upload everything
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}             # v0.2.0
+          name: Empress Card Binder ${{ github.ref_name }}
+          draft: false
           prerelease: false
+          files: |
+            dist/**/bundle/**/Empire*.dmg
+            dist/**/bundle/**/Empire*.app.tar.gz
+            dist/**/bundle/**/Empire*.sig
+            dist/**/bundle/**/Empire*.msi
+            dist/**/bundle/**/Empire*.AppImage
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 🔁 Optional: retry in case of transient upload hiccups
+      - name: Retry missed uploads (best-effort)
+        if: failure()
+        run: |
+          set -e
+          for i in 1 2 3 4; do
+            gh release upload "${GITHUB_REF_NAME}" dist/**/bundle/**/* --clobber && exit 0 || sleep $((i*10))
+          done
+          echo "Upload still failing after retries" && exit 1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
