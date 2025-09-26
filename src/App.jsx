@@ -22,11 +22,19 @@ const TIER_OPTIONS = [
 
 // Hardcoded default collections (edit this list whenever you like)
 const DEFAULT_COLLECTIONS = [
-  "Dayseal",
+  "Aurora Seal",
+  "Celestial Oath",
   "Everflame Mandate",
-  "First Light",
-  "Mooncrown Eclipse",
-  "Starseal Registry"
+  "Everglow Edict - S1",
+  "First Light - S1",
+  "Imperial Dayseal",
+  "Línglián Shì",
+  "Mooncrown Eclipse - S1",
+  "Pavilion Scrolls - S1",
+  "Starseal Registry",
+  "Heaven's Seal - Tiān Xǐ",
+  "Sky Codex - Xiāo Diǎn",
+  "Two-Sun Covenant",
 ];
 
 // Persist only user-added collections separately
@@ -918,6 +926,144 @@ function orderItemsInGroup(orderMap, groupName, items) {
   return out;
 }
 
+function SpaceBackdrop({ theme }) {
+  const isDark = theme === "dark";
+
+  // generate a few dozen stars once (dark mode only)
+  const stars = React.useMemo(() => {
+    const rng = (n) => Array.from({ length: n }, (_, i) => ({
+      id: i,
+      x: Math.random() * 100,
+      y: Math.random() * 100,
+      r: Math.random() * 0.7 + 0.15,
+      twinkle: (Math.random() * 4 + 2).toFixed(2),
+      delay: (Math.random() * 3).toFixed(2),
+    }));
+    return rng(120);
+  }, []);
+
+  return (
+    <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
+      {/* Base gradient */}
+      <div
+        className={
+          isDark
+            ? "absolute inset-0 bg-[radial-gradient(1200px_800px_at_20%_10%,#1e293b_0%,#0b1020_45%,#060911_100%)]"
+            : "absolute inset-0 bg-gradient-to-b from-sky-50 via-indigo-50 to-white"
+        }
+      />
+
+      {isDark ? (
+        <>
+          {/* soft galaxy glows */}
+          <div className="absolute -top-40 -left-20 w-[60vw] h-[60vw] rounded-full blur-3xl opacity-30"
+               style={{ background: "radial-gradient(closest-side, #7c3aed, transparent 70%)" }} />
+          <div className="absolute top-[-10vh] right-[-20vw] w-[70vw] h-[70vw] rounded-full blur-3xl opacity-25"
+               style={{ background: "radial-gradient(closest-side, #06b6d4, transparent 70%)" }} />
+          <div className="absolute bottom-[-20vh] left-[10vw] w-[55vw] h-[55vw] rounded-full blur-3xl opacity-20"
+               style={{ background: "radial-gradient(closest-side, #22d3ee, transparent 70%)" }} />
+
+          {/* star field (SVG so it stays crisp) */}
+          <svg
+            className="absolute inset-0 w-full h-full"
+            viewBox="0 0 100 100"
+            preserveAspectRatio="none"
+          >
+            <defs>
+              <radialGradient id="starGrad" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stopColor="white" stopOpacity="1" />
+                <stop offset="100%" stopColor="white" stopOpacity="0" />
+              </radialGradient>
+              <filter id="softGlow">
+                <feGaussianBlur stdDeviation="0.2" result="blur" />
+                <feMerge>
+                  <feMergeNode in="blur" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+            </defs>
+
+            {stars.map((s) => (
+              <circle
+                key={s.id}
+                cx={s.x}
+                cy={s.y}
+                r={s.r}
+                fill="url(#starGrad)"
+                filter="url(#softGlow)"
+                opacity="0.7"
+              >
+                <animate
+                  attributeName="opacity"
+                  values="0.4;1;0.4"
+                  dur={`${s.twinkle}s`}
+                  begin={`${s.delay}s`}
+                  repeatCount="indefinite"
+                />
+              </circle>
+            ))}
+          </svg>
+        </>
+      ) : (
+        <>
+          {/* big, soft planet with ring (light theme) */}
+          <svg
+            className="absolute -right-[8vw] -top-[6vw] w-[40vw] h-[40vw]"
+            viewBox="0 0 100 100"
+            aria-hidden
+          >
+            {/* subtle halo */}
+            <radialGradient id="planetGlow" cx="50%" cy="50%" r="60%">
+              <stop offset="0%" stopColor="#a5b4fc" stopOpacity="0.35" />
+              <stop offset="100%" stopColor="#a5b4fc" stopOpacity="0" />
+            </radialGradient>
+            <circle cx="52" cy="48" r="42" fill="url(#planetGlow)" />
+
+            {/* ring */}
+            <g opacity="0.45">
+              <ellipse cx="52" cy="50" rx="46" ry="14" fill="none" stroke="#94a3b8" strokeWidth="1.2" />
+              <ellipse cx="52" cy="50" rx="46" ry="14" fill="none" stroke="#c7d2fe" strokeWidth="0.6" />
+            </g>
+
+            {/* planet body */}
+            <defs>
+              <linearGradient id="planetBody" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stopColor="#c7d2fe" />
+                <stop offset="100%" stopColor="#e0e7ff" />
+              </linearGradient>
+            </defs>
+            <circle cx="52" cy="48" r="28" fill="url(#planetBody)" />
+
+            {/* gentle float */}
+            <animateTransform
+              attributeName="transform"
+              type="translate"
+              values="0 0; 0 1; 0 0"
+              dur="12s"
+              repeatCount="indefinite"
+            />
+          </svg>
+
+          {/* a few tiny dots to suggest distant stars */}
+          <div className="absolute inset-0 opacity-40">
+            <div className="absolute left-[10%] top-[20%] w-1 h-1 rounded-full bg-indigo-200" />
+            <div className="absolute left-[22%] top-[65%] w-[3px] h-[3px] rounded-full bg-sky-300" />
+            <div className="absolute left-[70%] top-[30%] w-[2px] h-[2px] rounded-full bg-indigo-300" />
+            <div className="absolute left-[80%] top-[70%] w-[2px] h-[2px] rounded-full bg-sky-200" />
+          </div>
+        </>
+      )}
+
+      {/* local keyframes (kept minimal & scoped) */}
+      <style>{`
+        @keyframes float-slow { 0% { transform: translateY(0px); } 50% { transform: translateY(-3px); } 100% { transform: translateY(0px); } }
+      `}</style>
+    </div>
+  );
+}
+
+
+
 export default function App() {
   const { metas, loading, upsert, remove } = useLocalMeta();
   const [updateProgress, setUpdateProgress] = useState(null);
@@ -1007,6 +1153,8 @@ export default function App() {
   const [gifBytes, setGifBytes] = useState(null); 
 
   const COLLAPSE_KEY = "pcb-collapsed-groups";
+
+  
 
   // collapsed map: { [groupKey]: true|false }
   const [collapsed, setCollapsed] = useState({});
@@ -1219,6 +1367,9 @@ export default function App() {
     () => (sortMode !== "none" ? sortedFlat : filtered),
     [sortedFlat, filtered, sortMode]
   );
+
+  const visibleCount = visibleList.length;
+  const totalCount = metas.length;
 
   function toggleSelected(id) {
     setSelectedIds((prev) => {
@@ -1709,9 +1860,22 @@ export default function App() {
                   <div className="font-medium truncate" title={m.name}>{m.name}</div>
                 )}
               </div>
+
               <button
-                className={`shrink-0 text-3xl leading-none w-9 h-9 -mr-1 cursor-pointer
-                        flex items-center justify-center rounded-full
+                className={`shrink-0 text-l leading-none w-9 h-9 mr-0
+                            flex items-center justify-center rounded-full cursor-pointer
+                            ${isDark ? "hover:bg-slate-800 text-gray-300" : "hover:bg-gray-100 text-gray-500"}
+                            focus:outline-none focus-visible:ring`}
+                onClick={(e) => { e.stopPropagation(); downloadCard(m.id); }}
+                title={`Download ${m.kind === "gif" ? "GIF" : "PDF"}`}
+                aria-label={`Download ${m.kind === "gif" ? "GIF" : "PDF"}`}
+              >
+                ⬇️
+              </button>
+
+              <button
+                className={`shrink-0 text-3xl leading-7 w-8 h-8 -mr-1 cursor-pointer
+                        flex  justify-center rounded-full
                         ${isDark ? "hover:bg-slate-800 text-gray-400" : "hover:bg-gray-100 text-gray-300"}
                         focus:outline-none focus-visible:ring`}
                 onClick={() => updateMeta(m.id, { favorite: !m.favorite })}
@@ -1889,13 +2053,52 @@ export default function App() {
     }
   }
 
+  // inside App(), add:
+  async function downloadCard(id) {
+    try {
+      const meta = /** @type {CardMeta} */ (await metaStore.getItem(id));
+      const raw  = await fileStore.getItem(id);
+      const bytes = toUint8(raw);
+
+      if (!meta || !bytes.length) {
+        showToast("Sorry, that file isn’t available.", "error");
+        return;
+      }
+
+      const ext  = meta.kind === "gif" ? "gif" : "pdf";
+      const mime = ext === "gif" ? "image/gif" : "application/pdf";
+      const safe = (meta.name || "card").replace(/[^\w\-]+/g, "_");
+
+      const blob = new Blob([bytes], { type: mime });
+      const url  = URL.createObjectURL(blob);
+
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${safe}.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+
+      showToast(`Downloading “${meta.name || "Card"}”`, "success");
+    } catch (e) {
+      console.error(e);
+      showToast("Download failed.", "error");
+    }
+  }
+
+
 
   return (
-    <div className={`min-h-screen ${isDark ? "bg-slate-900 text-slate-100" : "bg-white text-slate-900"}`}>
+    <div className={`min-h-screen relative ${isDark ? "bg-slate-900 text-slate-100" : "bg-white text-slate-900"}`}>
       <header className={`sticky top-0 z-40 backdrop-blur border-b
          ${isDark ? "bg-slate-900/90 border-slate-800" : "bg-white/90 border-slate-200"}`}>
         <div className="max-w-6xl mx-auto p-4 flex flex-wrap items-center gap-3">
-          <h1 className="text-2xl font-bold">Empire Card Collection</h1>
+          <h1 className="text-2xl font-bold flex items-center gap-2">
+            Empire Card Collection
+          </h1>
+
+
 
           <ThemeToggle theme={theme} setTheme={setTheme} />
 
@@ -2280,6 +2483,37 @@ export default function App() {
 
                 );
               })}
+
+              {/* Floating Cards Orb */}
+              <div
+                className="fixed top-8 right-8 z-50"
+                title={visibleCount === totalCount
+                  ? `Total cards: ${totalCount}`
+                  : `Showing ${visibleCount} of ${totalCount} cards`}
+                aria-live="polite"
+                aria-label={visibleCount === totalCount
+                  ? `Cards: ${totalCount}`
+                  : `Cards: ${visibleCount} of ${totalCount}`}
+              >
+                <div
+                  className={
+                    `w-20 h-20 rounded-full shadow-xl ring-1 flex items-center justify-center
+                    ${isDark
+                      ? "bg-indigo-900/50 ring-indigo-700/50 text-indigo-100"
+                      : "bg-indigo-50 ring-indigo-300 text-indigo-900"}`
+                  }
+                >
+                  <div className="text-center leading-none">
+                    <div className="text-[14px] tracking-wider opacity-70">CARDS</div>
+                    {visibleCount === totalCount ? (
+                      <div className="text-xl font-bold">{totalCount}</div>
+                    ) : (
+                      <div className="text-[18px] font-semibold">{visibleCount} / {totalCount}</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
             </div>
           )}
 
