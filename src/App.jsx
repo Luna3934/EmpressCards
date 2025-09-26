@@ -1345,15 +1345,30 @@ export default function App() {
     pages_asc: (a, b) => (a.pages || 0) - (b.pages || 0),
 
     // NEW:
-    tier_desc: (a, b) => {
-      const ra = tierIndex(a.tier), rb = tierIndex(b.tier);
-      if (ra !== rb) return ra - rb;                         // Dawn → Immortal (per TIER_OPTIONS)
-      return (a.name || "").localeCompare(b.name || "");     // tiebreaker
-    },
     tier_asc: (a, b) => {
       const ra = tierIndex(a.tier), rb = tierIndex(b.tier);
-      if (ra !== rb) return rb - ra;                         // Immortal → Dawn
-      return (a.name || "").localeCompare(b.name || "");     // tiebreaker
+
+      // keep "no tier" at the end
+      const aNo = !Number.isFinite(ra), bNo = !Number.isFinite(rb);
+      if (aNo && bNo) return (a.name || "").localeCompare(b.name || "");
+      if (aNo) return 1;          // a goes after b
+      if (bNo) return -1;         // b goes after a
+
+      if (ra !== rb) return ra - rb;  // Dawn → Immortal
+      return (a.name || "").localeCompare(b.name || "");
+    },
+
+    tier_desc: (a, b) => {
+      const ra = tierIndex(a.tier), rb = tierIndex(b.tier);
+
+      // keep "no tier" at the end
+      const aNo = !Number.isFinite(ra), bNo = !Number.isFinite(rb);
+      if (aNo && bNo) return (a.name || "").localeCompare(b.name || "");
+      if (aNo) return 1;          // a goes after b
+      if (bNo) return -1;         // b goes after a
+
+      if (ra !== rb) return rb - ra;  // Immortal → Dawn
+      return (a.name || "").localeCompare(b.name || "");
     },
   };
 
