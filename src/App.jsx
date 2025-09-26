@@ -37,6 +37,13 @@ const DEFAULT_COLLECTIONS = [
   "Two-Sun Covenant",
 ];
 
+// Rank helper for tier sorting (case-insensitive; unknown/empty -> bottom)
+const tierIndex = (t) => {
+  const i = TIER_OPTIONS.findIndex(x => x.toLowerCase() === String(t || "").toLowerCase());
+  return i === -1 ? Number.POSITIVE_INFINITY : i;
+};
+
+
 // Persist only user-added collections separately
 const customCollectionStore = localforage.createInstance({
   name: "pdf-card-binder-custom-collections"
@@ -1152,6 +1159,9 @@ export default function App() {
   const [gifState, setGifState] = useState({ open: false, id: "" });
   const [gifBytes, setGifBytes] = useState(null); 
 
+  const [bulkApplying, setBulkApplying] = useState(false);
+
+
   const COLLAPSE_KEY = "pcb-collapsed-groups";
 
   
@@ -1333,7 +1343,20 @@ export default function App() {
     updated_new: (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0),
     pages_desc: (a, b) => (b.pages || 0) - (a.pages || 0),
     pages_asc: (a, b) => (a.pages || 0) - (b.pages || 0),
+
+    // NEW:
+    tier_desc: (a, b) => {
+      const ra = tierIndex(a.tier), rb = tierIndex(b.tier);
+      if (ra !== rb) return ra - rb;                         // Dawn → Immortal (per TIER_OPTIONS)
+      return (a.name || "").localeCompare(b.name || "");     // tiebreaker
+    },
+    tier_asc: (a, b) => {
+      const ra = tierIndex(a.tier), rb = tierIndex(b.tier);
+      if (ra !== rb) return rb - ra;                         // Immortal → Dawn
+      return (a.name || "").localeCompare(b.name || "");     // tiebreaker
+    },
   };
+
 
   const sortedFlat = useMemo(() => {
     const arr = [...filtered];
@@ -1387,8 +1410,14 @@ export default function App() {
   }, [bulkMode]);
 
   async function applyBulk() {
-    if (selectedIds.size === 0) return;
+    if (selectedIds.size === 0) {
+      showToast("No cards selected.", "info");
+      return;
+    }
 
+    setBulkApplying(true);
+
+    // Build the patch (same logic as before)
     const patch = {};
     if (bulkCollection === "__clear__") patch.collection = "";
     else if (bulkCollection && bulkCollection !== "__keep__") patch.collection = bulkCollection;
@@ -1399,9 +1428,24 @@ export default function App() {
     if (bulkFavorite === "true") patch.favorite = true;
     if (bulkFavorite === "false") patch.favorite = false;
 
-    if (Object.keys(patch).length === 0) return;
-    await Promise.all(Array.from(selectedIds).map((id) => updateMeta(id, patch)));
+    // Apply if there are actual changes
+    if (Object.keys(patch).length > 0) {
+      await Promise.all(Array.from(selectedIds).map((id) => updateMeta(id, patch)));
+      showToast(`Updated ${selectedIds.size} card${selectedIds.size > 1 ? "s" : ""}.`, "success");
+    } else {
+      // No changes chosen, but user clicked Apply — still clear the UI per your request
+      showToast("Cleared selection.", "info");
+    }
+
+    // ✅ Always clear selection and reset bulk inputs after clicking Apply
+    clearSelection();
+    setBulkCollection("");
+    setBulkTier("");
+    setBulkFavorite("");
+
+    setBulkApplying(false);
   }
+
 
   async function addCustomCollection(name) {
     const n = (name || "").trim();
@@ -2143,6 +2187,8 @@ export default function App() {
             <option value="none">Default order (folders)</option>
             <option value="name_asc">Name A→Z</option>
             <option value="name_desc">Name Z→A</option>
+            <option value="tier_asc">Tier low→high</option>
+            <option value="tier_desc">Tier high→low</option>
             <option value="created_new">Newest added</option>
             <option value="created_old">Oldest added</option>
             <option value="updated_new">Recently edited</option>
@@ -2373,11 +2419,12 @@ export default function App() {
               <button
                 className="px-3 py-2 rounded-xl border bg-blue-600 text-white hover:bg-slate-700"
                 onClick={applyBulk}
-                disabled={selectedIds.size === 0}
+                disabled={selectedIds.size === 0 || bulkApplying}
                 title="Apply selected bulk changes"
               >
-                Apply to selected
+                {bulkApplying ? "Applying…" : "Apply to selected"}
               </button>
+
             </div>
           )}
         </div>
