@@ -4,8 +4,18 @@ import { v4 as uuidv4 } from "uuid";
 import { GlobalWorkerOptions, getDocument } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
-// Desktop-safe pdf.js worker (bundled locally for Tauri/Electron)
-GlobalWorkerOptions.workerPort = new Worker(workerUrl, { type: "module" });
+// Desktop & web-safe pdf.js worker init (module worker everywhere)
+try {
+  const pdfWorker = new Worker(
+    new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url),
+    { type: 'module' }
+  );
+  GlobalWorkerOptions.workerPort = pdfWorker;
+} catch (e) {
+  console.warn('[pdfjs] module worker init failed', e);
+}
+
+
 
 // ---- Simple persistent stores ----
 const metaStore = localforage.createInstance({ name: "pdf-card-binder-meta" });
@@ -47,11 +57,66 @@ const DEFAULT_COLLECTIONS = [
   "Aerial Pavilion",
   "Seraphic Testament",
   "Jade-Antler Mooncrest",
+  "Jade Cat Private Garden",
+  "Immortal Cat Imperial Court",
+  "Immortal Fragments",
+  "Empress’ Favor Notes",
 ];
+
+// Hoisted version — safe to use earlier in the file
+function keyForCollection(c) {
+  return normalizeCollectionName(c || "(None)").toLowerCase();
+}
+
 
 const SORTED_COLLECTIONS = [...DEFAULT_COLLECTIONS].sort((a, b) =>
   a.localeCompare(b, 'en', { sensitivity: 'base', numeric: true })
 );
+
+/** Map a collection name → its default Tier (case/whitespace-insensitive). */
+const COLLECTION_DEFAULT_TIER_RAW = {
+  "Aurora Seal" : "Immortal",
+  "Aurora Sunveil Pavilion" : "Dawn",
+  "Celestial Oath" : "Ascendant",
+  "Everflame Mandate" : "Phoenix",
+  "Everglow Edict - S1" : "Empyreal",
+  "First Light - S1" : "Dawn",
+  "Imperial Dayseal" : "Empyreal",
+  "Línglián Shì" : "Lotus",
+  "Mooncrown Eclipse - S1" : "Eclipse",
+  "Pavilion Scrolls - S1" : "Jade",
+  "Quiet Court" : "Lotus",
+  "Shadow Mandate" : "Eclipse",
+  "Starkeep Manuscript" : "Scribe",
+  "Starseal Registry" : "Scribe",
+  "Heaven's Seal - Tiān Xǐ" : "Celestial",
+  "Sky Codex - Xiāo Diǎn" : "Transcendent",
+  "Two-Sun Covenant" : "Jade",
+  "Writ Archive" : "Seal",
+  "Zenith Gate" : "Celestial",
+  "Firewing Aegis" : "Phoenix",
+  "Aether Gate" : "Transcendent",
+  "Dominion Scroll" : "Sovereign",
+  "Aerial Pavilion" : "Ascendant",
+  "Seraphic Testament" : "Empyreal",
+  "Jade-Antler Mooncrest" : "Immortal",
+  "Jade Cat Private Garden" : "Jade",
+  "Immortal Cat Imperial Court" : "Immortal",
+};
+
+/** Build a normalized lookup so "  Celestial  Oath " works the same. */
+const COLLECTION_DEFAULT_TIER = Object.fromEntries(
+  Object.entries(COLLECTION_DEFAULT_TIER_RAW).map(([k, v]) => [
+    keyForCollection(k), v
+  ])
+);
+
+/** Return a tier for a given collection name (or "" if none). */
+function defaultTierForCollection(name) {
+  const t = COLLECTION_DEFAULT_TIER[keyForCollection(name)];
+  return TIER_OPTIONS.includes(t) ? t : "";
+}
+
 
 
 // Rank helper for tier sorting (case-insensitive; unknown/empty -> bottom)
@@ -70,6 +135,7 @@ const customCollectionStore = localforage.createInstance({
 /** @typedef {{ id: string; name: string; pages: number; tags: string[]; collection?: string; thumbnailDataUrl: string; createdAt: number; updatedAt: number; tier?: string; favorite?: boolean; kind?: "pdf" | "gif"}} CardMeta */
 
 const THEME_KEY = "pcb-theme"; // 'light' | 'dark'
+const AUTO_TIER_KEY = "pcb-auto-tier"; // '1' = on, '0' = off
 const DEBUG_DND = false;
 const d = (...args) => { if (DEBUG_DND) console.log("[DND]", ...args); };
 
@@ -931,8 +997,14 @@ function GifLightbox({ open, onClose, fileBytes, name, theme, onPrev, onNext, ca
 //  (Pointer-based; no OS DnD)
 // =====================
 
-/** Compute a stable key for a collection group. */
-const keyForCollection = (c) => (c || "(None)").toLowerCase();
+/** Normalize a collection name for consistent compares & storage. */
+function normalizeCollectionName(s) {
+  return String(s ?? "")
+    .trim()                // remove leading/trailing spaces
+    .replace(/\s+/g, " "); // collapse internal whitespace
+}
+
+
 
 /** Returns items in a group in persisted order, with any new items appended by createdAt. */
 function orderItemsInGroup(orderMap, groupName, items) {
@@ -1193,6 +1265,16 @@ export default function App() {
   // in App()
   const [debugOpen, setDebugOpen] = useState(false);
   const [debugLines, setDebugLines] = useState(readDebugBuffer());
+
+  const [autoTierFromCollection, setAutoTierFromCollection] = useState(() => {
+    try { return localStorage.getItem(AUTO_TIER_KEY) !== "0"; } catch { return true; } // default ON
+  });
+  useEffect(() => {
+    try { localStorage.setItem(AUTO_TIER_KEY, autoTierFromCollection ? "1" : "0"); } catch {}
+  }, [autoTierFromCollection]);
+
+
+
   useEffect(() => {
     const onBuf = (e) => setDebugLines(Array.isArray(e.detail) ? e.detail : readDebugBuffer());
     window.addEventListener("pcb-debug-buffer-updated", onBuf);
@@ -1527,6 +1609,27 @@ export default function App() {
       return next;
     });
   }
+
+    function selectAllInCollection(name, items) {
+    // items = visible items for that collection
+    const ids = items.map(m => m.id);
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      ids.forEach(id => next.add(id));
+      return next;
+    });
+  }
+
+  function clearSelectionInCollection(name, items) {
+    const ids = new Set(items.map(m => m.id));
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      ids.forEach(id => next.delete(id));
+      return next;
+    });
+  }
+
+
   function selectAllVisible() { setSelectedIds(new Set(visibleList.map((m) => m.id))); }
   function clearSelection() { setSelectedIds(new Set()); }
 
@@ -1543,34 +1646,60 @@ export default function App() {
 
     setBulkApplying(true);
 
-    // Build the patch (same logic as before)
-    const patch = {};
-    if (bulkCollection === "__clear__") patch.collection = "";
-    else if (bulkCollection && bulkCollection !== "__keep__") patch.collection = bulkCollection;
+    // Build the base patch without tier (we’ll decide tier per card)
+    const basePatch = {};
+    if (bulkCollection === "__clear__") basePatch.collection = "";
+    else if (bulkCollection && bulkCollection !== "__keep__") basePatch.collection = bulkCollection;
 
-    if (bulkTier === "__clear__") patch.tier = "";
-    else if (bulkTier && bulkTier !== "__keep__") patch.tier = bulkTier;
+    // Bulk favorite is global (not per-card dependent)
+    if (bulkFavorite === "true") basePatch.favorite = true;
+    if (bulkFavorite === "false") basePatch.favorite = false;
 
-    if (bulkFavorite === "true") patch.favorite = true;
-    if (bulkFavorite === "false") patch.favorite = false;
+    const ids = Array.from(selectedIds);
 
-    // Apply if there are actual changes
-    if (Object.keys(patch).length > 0) {
-      await Promise.all(Array.from(selectedIds).map((id) => updateMeta(id, patch)));
-      showToast(`Updated ${selectedIds.size} card${selectedIds.size > 1 ? "s" : ""}.`, "success");
-    } else {
-      // No changes chosen, but user clicked Apply — still clear the UI per your request
-      showToast("Cleared selection.", "info");
-    }
+    // Apply per-card, so we can compute tier suggestions only for untiered cards
+    await Promise.all(ids.map(async (id) => {
+      const existing = /** @type {CardMeta} */ (await metaStore.getItem(id));
 
-    // ✅ Always clear selection and reset bulk inputs after clicking Apply
+      // Start with a fresh patch each time
+      const patch = { ...basePatch };
+
+      // If the user explicitly set/cleared a bulk tier, honor it
+      if (bulkTier === "__clear__") {
+        patch.tier = "";
+      } else if (bulkTier && bulkTier !== "__keep__") {
+        patch.tier = bulkTier; // user-picked tier wins
+      } else {
+        // No explicit bulk tier — maybe auto-suggest from collection
+        // Only do this if:
+        // - auto-tier toggle is ON
+        // - a collection is being set (not cleared)
+        // - this card currently has no tier
+        if (autoTierFromCollection &&
+            typeof basePatch.collection === "string" &&
+            basePatch.collection.trim() !== "" &&
+            !(existing?.tier)) {
+          const suggested = defaultTierForCollection(basePatch.collection);
+          if (suggested) {
+            patch.tier = suggested;
+          }
+        }
+      }
+
+      // Now use your existing updater (it still normalizes, clamps, etc.)
+      await updateMeta(id, patch);
+    }));
+
+    showToast(`Updated ${ids.length} card${ids.length > 1 ? "s" : ""}.`, "success");
+
+    // Clear selection + reset bulk inputs for next run
     clearSelection();
     setBulkCollection("");
     setBulkTier("");
     setBulkFavorite("");
-
     setBulkApplying(false);
   }
+
 
 
   async function addCustomCollection(name) {
@@ -1585,29 +1714,59 @@ export default function App() {
   }
 
   async function deleteCustomCollection(name) {
-    const n = (name || "").trim();
+    const nRaw = name || "";
+    const n = normalizeCollectionName(nRaw);
     if (!n) return;
-    if (SORTED_COLLECTIONS.some(c => c.toLowerCase() === n.toLowerCase())) {
+
+    // Block deletion of defaults
+    const isDefault = SORTED_COLLECTIONS.some(
+      c => normalizeCollectionName(c).toLowerCase() === n.toLowerCase()
+    );
+    if (isDefault) {
       alert("Default collections are built into the app and can’t be deleted here.");
       return;
     }
-    if (!customCollections.some(c => c.toLowerCase() === n.toLowerCase())) return;
+
+    // Ensure it actually exists in custom
+    if (!customCollections.some(
+      c => normalizeCollectionName(c).toLowerCase() === n.toLowerCase()
+    )) return;
 
     if (!window.confirm(`Delete collection "${n}"?\nCards using it will be set to (None).`)) return;
 
-    const next = customCollections.filter(c => c.toLowerCase() !== n.toLowerCase());
+    // Remove from custom list
+    const next = customCollections.filter(
+      c => normalizeCollectionName(c).toLowerCase() !== n.toLowerCase()
+    );
     setCustomCollections(next);
     await customCollectionStore.setItem("list", next);
 
+    // Reassign any cards using *any* variant of this name
     for (const m of metas) {
-      if ((m.collection || "").toLowerCase() === n.toLowerCase()) {
-        await updateMeta(m.id, { collection: "" });
+      const mc = normalizeCollectionName(m.collection || "");
+      if (mc.toLowerCase() === n.toLowerCase()) {
+        await updateMeta(m.id, { collection: "" }); // normalized in updateMeta
       }
     }
-    if ((activeCollection || "").toLowerCase() === n.toLowerCase()) {
+
+    // If currently filtered to that collection, clear the filter
+    if (normalizeCollectionName(activeCollection).toLowerCase() === n.toLowerCase()) {
       setActiveCollection("");
     }
+
+    // Clean persisted order + collapsed state for this collection group
+    const key = keyForCollection(n);
+    const nextOrderMap = { ...orderMap };
+    delete nextOrderMap[key];
+    persistOrder(nextOrderMap);
+
+    setCollapsed(prev => {
+      const copy = { ...prev };
+      delete copy[key];
+      return copy;
+    });
   }
+
 
   async function importFiles(files) {
     if (!files?.length) return;
@@ -1718,10 +1877,33 @@ export default function App() {
 
   async function updateMeta(id, patch) {
     const existing = /** @type {CardMeta} */ (await metaStore.getItem(id));
-    const updated = { ...existing, ...patch, updatedAt: Date.now() };
+    let p = { ...patch };
+
+    // If collection is being changed, normalize it and maybe auto-tier
+    if (Object.prototype.hasOwnProperty.call(p, "collection")) {
+      p.collection = normalizeCollectionName(p.collection);
+
+      // new: always set suggested tier on collection change
+      // unless the caller explicitly provided a tier in the patch
+      if (autoTierFromCollection) {
+        const suggested = defaultTierForCollection(p.collection);
+        if (suggested && !("tier" in p)) {
+          p.tier = suggested;
+        }
+      }
+
+    }
+
+    // Safety: clamp unknown tiers to "" (protects against typos)
+    if (Object.prototype.hasOwnProperty.call(p, "tier")) {
+      if (p.tier && !TIER_OPTIONS.includes(p.tier)) p.tier = "";
+    }
+
+    const updated = { ...existing, ...p, updatedAt: Date.now() };
     await metaStore.setItem(id, updated);
     await upsert(updated);
   }
+
 
   async function exportJson() {
     // Gather auxiliary stores
@@ -2069,19 +2251,42 @@ export default function App() {
                       ${isDark ? "bg-slate-800 border-slate-700 hover:bg-slate-700" : "bg-white border-slate-300 hover:bg-slate-50"}`}
                     value={m.collection || ""}
                     onChange={async (e) => {
-                      const val = e.target.value;
-                      if (val === "__add_new__") {
-                        const name = window.prompt("New collection name");
-                        const n = (name || "").trim();
-                        if (n) {
-                          await addCustomCollection(n);
-                          await updateMeta(m.id, { collection: n });
+                    const val = e.target.value;
+
+                    if (val === "__add_new__") {
+                      const name = window.prompt("New collection name");
+                      const n = (name || "").trim();
+                      if (n) {
+                        await addCustomCollection(n);
+
+                        // Prefill tier (only when toggle is on AND this card has no tier yet)
+                        if (autoTierFromCollection && !m.tier) {
+                          const suggested = defaultTierForCollection(n);
+                          if (suggested) {
+                            await updateMeta(m.id, { collection: n, tier: suggested });
+                            return;
+                          }
                         }
-                        e.target.value = m.collection || "";
-                      } else {
-                        await updateMeta(m.id, { collection: val });
+
+                        await updateMeta(m.id, { collection: n });
                       }
-                    }}
+                      // reset the select back to the card’s current value if user cancelled/blank
+                      e.target.value = m.collection || "";
+                      return;
+                    }
+
+                    // Normal path
+                    if (autoTierFromCollection && !m.tier) {
+                      const suggested = defaultTierForCollection(val);
+                      if (suggested) {
+                        await updateMeta(m.id, { collection: val, tier: suggested });
+                        return;
+                      }
+                    }
+
+                    await updateMeta(m.id, { collection: val });
+                  }}
+
                   >
                     <option value="">(None)</option>
                     <optgroup label="Default collections">
@@ -2100,10 +2305,16 @@ export default function App() {
 
                 <div className="flex items-center gap-2 mb-2">
                   <select
-                    className={`border rounded-md px-2 py-1 text-sm w-full cursor-pointer
-                      ${isDark ? "bg-slate-800 border-slate-700 hover:bg-slate-700" : "bg-white border-slate-300 hover:bg-slate-50"}`}
+                    className={
+                      `border rounded-md px-2 py-1 text-sm w-full ` +
+                      (autoTierFromCollection
+                        ? `${isDark ? "bg-slate-800/50 border-slate-700 text-slate-400" : "bg-gray-50 border-slate-300 text-gray-400"} cursor-not-allowed`
+                        : `${isDark ? "bg-slate-800 border-slate-700 hover:bg-slate-700" : "bg-white border-slate-300 hover:bg-slate-50"} cursor-pointer`)
+                    }
                     value={m.tier || ""}
                     onChange={(e) => updateMeta(m.id, { tier: e.target.value })}
+                    disabled={autoTierFromCollection}
+                    title={autoTierFromCollection ? "Tier is set automatically from the collection" : "Set tier"}
                   >
                     <option value="">(No tier)</option>
                     {TIER_OPTIONS.map((t) => (
@@ -2111,6 +2322,7 @@ export default function App() {
                     ))}
                   </select>
                 </div>
+
 
                 <TagEditor value={m.tags} onChange={(tags) => updateMeta(m.id, { tags })} theme={theme} />
 
@@ -2401,6 +2613,22 @@ export default function App() {
             />
             Bulk edit
           </label>
+          <label
+            className={`px-3 py-2 rounded-xl border cursor-pointer
+              ${autoTierFromCollection
+                ? (isDark ? "bg-emerald-900/20 border-emerald-700" : "bg-emerald-50 border-emerald-300")
+                : (isDark ? "border-slate-700 hover:bg-slate-700" : "border-slate-300 hover:bg-slate-50")}`}
+            title="When you change a card’s collection, auto-set its tier from the collection’s default (only if the card has no tier yet)."
+          >
+            <input
+              type="checkbox"
+              className="mr-2"
+              checked={autoTierFromCollection}
+              onChange={(e) => setAutoTierFromCollection(e.target.checked)}
+            />
+            Auto-select tier
+          </label>
+
 
           {sortMode === "none" && (
               <>
@@ -2484,7 +2712,7 @@ export default function App() {
                 Selected: {selectedIds.size} / {visibleList.length}
               </span>
               <button className={`px-2 py-1 border rounded ${isDark ? "border-slate-700 bg-slate-800 hover:bg-slate-700" : "border-slate-300 bg-white hover:bg-slate-50"}`} onClick={selectAllVisible}>
-                Select all visible
+                Select all
               </button>
               <button className={`px-2 py-1 border rounded ${isDark ? "border-slate-700 bg-slate-800 hover:bg-slate-700" : "border-slate-300 bg-white hover:bg-slate-50"}`} onClick={clearSelection}>
                 Clear selection
@@ -2496,21 +2724,38 @@ export default function App() {
                 value={bulkCollection}
                 onChange={async (e) => {
                   const v = e.target.value;
+
                   if (v === "__add_new__") {
                     const name = window.prompt("New collection name");
                     const n = (name || "").trim();
                     if (n) {
                       await addCustomCollection(n);
                       setBulkCollection(n);
+                      if (autoTierFromCollection) {
+                        const suggested = defaultTierForCollection(n);
+                        setBulkTier(suggested || "");
+                      }
                     } else {
                       setBulkCollection("");
                     }
-                  } else {
-                    setBulkCollection(v);
+                    return;
+                  }
+
+                  setBulkCollection(v);
+
+                  // ⬇️ Prefill Bulk Tier based on collection (only when auto-tier is enabled)
+                  if (autoTierFromCollection) {
+                    if (!v || v === "__clear__" || v === "__keep__") {
+                      // don't touch the user's current tier choice when clearing/keeping
+                    } else {
+                      const suggested = defaultTierForCollection(v);
+                      setBulkTier(suggested || ""); // empty if no mapping
+                    }
                   }
                 }}
                 title="Set or clear collection for selected"
               >
+
                 <option value="">Collection (no change)</option>
                 <option value="__clear__">— Clear collection —</option>
                 <optgroup label="Default">
@@ -2528,10 +2773,16 @@ export default function App() {
 
               {/* Bulk Tier */}
               <select
-                className={`border rounded-xl px-3 py-2 ${isDark ? "bg-slate-800 border-slate-700 hover:bg-slate-700" : "bg-white border-slate-300 hover:bg-slate-50"}`}
+                className={
+                  `border rounded-xl px-3 py-2 ` +
+                  (autoTierFromCollection
+                    ? `${isDark ? "bg-slate-800/50 border-slate-700 text-slate-400" : "bg-gray-50 border-slate-300 text-gray-400"} cursor-not-allowed`
+                    : `${isDark ? "bg-slate-800 border-slate-700 hover:bg-slate-700" : "bg-white border-slate-300 hover:bg-slate-50"} cursor-pointer`)
+                }
                 value={bulkTier}
                 onChange={(e) => setBulkTier(e.target.value)}
-                title="Set or clear tier for selected"
+                title={autoTierFromCollection ? "Tier is set automatically from the collection" : "Set or clear tier for selected"}
+                disabled={autoTierFromCollection}
               >
                 <option value="">Tier (no change)</option>
                 <option value="__clear__">— Clear tier —</option>
@@ -2539,6 +2790,7 @@ export default function App() {
                   <option key={"bt-" + t} value={t}>{t}</option>
                 ))}
               </select>
+
 
               {/* Bulk Favorite */}
               <select
@@ -2612,6 +2864,7 @@ export default function App() {
                   <section key={name} className={`border rounded-2xl overflow-hidden ${isDark ? "border-slate-700" : "border-slate-200"}`}>
                     <div className={`px-4 py-2 border-b flex items-center justify-between
                       ${isDark ? "bg-slate-800 border-slate-700" : "bg-gray-50 border-slate-200"}`}>
+
                       <div className="flex items-center gap-3">
                         <button
                           className={`w-7 h-7 rounded-md border flex items-center justify-center
@@ -2625,10 +2878,43 @@ export default function App() {
                         </button>
                         <h2 className="font-semibold">{name}</h2>
                       </div>
-                      <span className={`text-xs ${isDark ? "text-gray-400" : "text-gray-500"}`}>
-                        {items.length} item{items.length !== 1 ? "s" : ""}
-                      </span>
+
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xs ${isDark ? "text-gray-400" : "text-gray-500"}`}>
+                          {items.length} item{items.length !== 1 ? "s" : ""}
+                        </span>
+
+                        {bulkMode && (
+                          <>
+                            {/* Optional: tiny selected count indicator */}
+                            <span className={`text-xs ${isDark ? "text-gray-400" : "text-gray-500"}`}>
+                              {items.filter(i => selectedIds.has(i.id)).length} selected
+                            </span>
+
+                            <button
+                              className={`px-2 py-1 rounded-md border text-xs
+                                ${isDark ? "border-slate-700 bg-slate-800 hover:bg-slate-700"
+                                        : "border-slate-300 bg-white hover:bg-slate-50"}`}
+                              onClick={() => selectAllInCollection(name, items)}
+                              title="Select all cards in this collection (visible only)"
+                            >
+                              Select all
+                            </button>
+
+                            <button
+                              className={`px-2 py-1 rounded-md border text-xs
+                                ${isDark ? "border-slate-700 bg-slate-800 hover:bg-slate-700"
+                                        : "border-slate-300 bg-white hover:bg-slate-50"}`}
+                              onClick={() => clearSelectionInCollection(name, items)}
+                              title="Clear selection for this collection"
+                            >
+                              Clear
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
+
 
                     {isGroupCollapsed(name) ? (
                       <div id={`group-${keyForCollection(name)}`} className={`px-4 py-3 text-sm ${isDark ? "bg-slate-900" : "bg-white"}`}>
