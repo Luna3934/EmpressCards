@@ -23,6 +23,7 @@ const TIER_OPTIONS = [
 // Hardcoded default collections (edit this list whenever you like)
 const DEFAULT_COLLECTIONS = [
   "Aurora Seal",
+  "Aurora Sunveil Pavilion",
   "Celestial Oath",
   "Everflame Mandate",
   "Everglow Edict - S1",
@@ -31,11 +32,27 @@ const DEFAULT_COLLECTIONS = [
   "Línglián Shì",
   "Mooncrown Eclipse - S1",
   "Pavilion Scrolls - S1",
+  "Quiet Court",
+  "Shadow Mandate",
+  "Starkeep Manuscript",
   "Starseal Registry",
   "Heaven's Seal - Tiān Xǐ",
   "Sky Codex - Xiāo Diǎn",
   "Two-Sun Covenant",
+  "Writ Archive",
+  "Zenith Gate",
+  "Firewing Aegis",
+  "Aether Gate",
+  "Dominion Scroll",
+  "Aerial Pavilion",
+  "Seraphic Testament",
+  "Jade-Antler Mooncrest",
 ];
+
+const SORTED_COLLECTIONS = [...DEFAULT_COLLECTIONS].sort((a, b) =>
+  a.localeCompare(b, 'en', { sensitivity: 'base', numeric: true })
+);
+
 
 // Rank helper for tier sorting (case-insensitive; unknown/empty -> bottom)
 const tierIndex = (t) => {
@@ -1164,7 +1181,9 @@ export default function App() {
 
   const COLLAPSE_KEY = "pcb-collapsed-groups";
 
-  
+  const NO_TIER_RANK = Number.POSITIVE_INFINITY; // but don't rely on it for desc
+
+
 
   // collapsed map: { [groupKey]: true|false }
   const [collapsed, setCollapsed] = useState({});
@@ -1270,7 +1289,7 @@ export default function App() {
             .map(m => m.collection)
             .filter(c =>
               c &&
-              !DEFAULT_COLLECTIONS.some(d => d.toLowerCase() === c.toLowerCase()) &&
+              !SORTED_COLLECTIONS.some(d => d.toLowerCase() === c.toLowerCase()) &&
               !stored.some(s => s.toLowerCase() === c.toLowerCase())
             )
         ));
@@ -1294,7 +1313,7 @@ export default function App() {
   const allCollections = useMemo(() => {
     const seen = new Set();
     const out = [];
-    for (const c of DEFAULT_COLLECTIONS) {
+    for (const c of SORTED_COLLECTIONS) {
       const k = c.toLowerCase();
       if (!seen.has(k)) { seen.add(k); out.push(c); }
     }
@@ -1370,18 +1389,37 @@ export default function App() {
       if (ra !== rb) return rb - ra;  // Immortal → Dawn
       return (a.name || "").localeCompare(b.name || "");
     },
+
+    // COLLECTION-ONLY (used to reorder folder sections; cards inside stay in their saved order)
+    collection_tier_asc: () => 0,   // Dawn → Immortal; untiered collections last
+    collection_tier_desc: () => 0,  // Immortal → Dawn; untiered collections last
+
   };
+
+  const CARD_SORT_KEYS = new Set([
+    "none",
+    "name_asc","name_desc",
+    "created_new","created_old",
+    "updated_new",
+    "pages_desc","pages_asc",
+    "tier_asc","tier_desc",
+  ]);
+
+  const isCardSort = (mode) => CARD_SORT_KEYS.has(mode);
+  const isCollectionSort = (mode) => mode === "collection_tier_asc" || mode === "collection_tier_desc";
+
 
 
   const sortedFlat = useMemo(() => {
     const arr = [...filtered];
     const cmp = sorters[sortMode] || sorters.none;
-    if (sortMode !== "none") arr.sort(cmp);
+    if (isCardSort(sortMode) && sortMode !== "none") arr.sort(cmp);
     return arr;
   }, [filtered, sortMode]);
 
-  // Group into collections
+
   const groupedByCollection = useMemo(() => {
+    // Build map of visible items by collection
     const map = new Map();
     for (const m of filtered) {
       const key = m.collection || "(None)";
@@ -1389,22 +1427,95 @@ export default function App() {
       map.get(key).push(m);
     }
 
-    const keys = [];
+    // Default section order: built-ins → customs (A→Z) → (None)
     const customs = [...map.keys()]
-      .filter(k => k !== "(None)" && !DEFAULT_COLLECTIONS.some(d => d.toLowerCase() === k.toLowerCase()))
-      .sort((a,b) => a.localeCompare(b));
+      .filter(k => k !== "(None)" && !SORTED_COLLECTIONS.some(d => d.toLowerCase() === k.toLowerCase()))
+      .sort((a,b) => a.localeCompare(b, 'en', { sensitivity: 'base', numeric: true }));
 
-    for (const c of DEFAULT_COLLECTIONS) if (map.has(c)) keys.push(c);
+    const keys = [];
+    for (const c of SORTED_COLLECTIONS) if (map.has(c)) keys.push(c);
     for (const c of customs) keys.push(c);
     if (map.has("(None)")) keys.push("(None)");
 
-    return keys.map(name => [name, map.get(name)]);
-  }, [filtered]);
+    // Helper: best (lowest) tier rank among visible items in a collection
+    const collectionTierRank = (items) => {
+      let best = Number.POSITIVE_INFINITY;
+      for (const m of items) {
+        const r = tierIndex(m.tier);
+        if (Number.isFinite(r) && r < best) best = r;
+      }
+      return best; // Infinity if no tiered cards
+    };
 
-  const visibleList = useMemo(
-    () => (sortMode !== "none" ? sortedFlat : filtered),
-    [sortedFlat, filtered, sortMode]
-  );
+    // Entries in default order
+    let entries = keys.map(name => [name, map.get(name)]);
+
+    // Apply collection-only sort
+    // Remove NO_TIER_RANK / normalizeRank or just stop using them here.
+
+    if (isCollectionSort(sortMode)) {
+      const desc = sortMode === "collection_tier_desc";
+      const dir = desc ? -1 : 1; // ← flip sort direction
+
+      // For each collection, compute lowest and highest tier indices present
+      const rankPair = (items) => {
+        let min = Number.POSITIVE_INFINITY;
+        let max = Number.NEGATIVE_INFINITY;
+        for (const m of items) {
+          const r = tierIndex(m.tier);
+          if (Number.isFinite(r)) {
+            if (r < min) min = r;
+            if (r > max) max = r;
+          }
+        }
+        return Number.isFinite(min)
+          ? { hasTier: true, min, max }
+          : { hasTier: false, min: Infinity, max: -Infinity };
+      };
+
+      entries.sort((a, b) => {
+        const [nameA, itemsA] = a;
+        const [nameB, itemsB] = b;
+
+        const ra = rankPair(itemsA);
+        const rb = rankPair(itemsB);
+
+        // Untiered collections always last
+        if (ra.hasTier !== rb.hasTier) return ra.hasTier ? -1 : 1;
+
+        if (ra.hasTier) {
+          // low→high uses min; high→low uses max
+          const va = desc ? ra.max : ra.min;
+          const vb = desc ? rb.max : rb.min;
+          if (va !== vb) return dir * (va - vb); // ← apply direction
+        }
+
+        // Ties: "(None)" last, then A→Z
+        const aNone = nameA === "(None)";
+        const bNone = nameB === "(None)";
+        if (aNone !== bNone) return aNone ? 1 : -1;
+
+        return nameA.localeCompare(nameB, 'en', { sensitivity: 'base', numeric: true });
+      });
+    }
+
+
+    return entries; // [ [collectionName, items[]], ... ]
+  }, [filtered, sortMode]);
+
+  const visibleList = useMemo(() => {
+    // Flat view when card sorting is active
+    if (isCardSort(sortMode) && sortMode !== "none") return sortedFlat;
+
+    // Grouped view: flatten groups in persisted order
+    const out = [];
+    for (const [name, items] of groupedByCollection) {
+      const ordered = orderItemsInGroup(orderMap, name, items);
+      out.push(...ordered);
+    }
+    return out;
+  }, [sortedFlat, groupedByCollection, orderMap, sortMode]);
+
 
   const visibleCount = visibleList.length;
   const totalCount = metas.length;
@@ -1465,7 +1576,7 @@ export default function App() {
   async function addCustomCollection(name) {
     const n = (name || "").trim();
     if (!n) return;
-    const exists = DEFAULT_COLLECTIONS.concat(customCollections)
+    const exists = SORTED_COLLECTIONS.concat(customCollections)
       .some(c => c.toLowerCase() === n.toLowerCase());
     if (exists) return;
     const next = [...customCollections, n].sort((a,b) => a.localeCompare(b));
@@ -1476,7 +1587,7 @@ export default function App() {
   async function deleteCustomCollection(name) {
     const n = (name || "").trim();
     if (!n) return;
-    if (DEFAULT_COLLECTIONS.some(c => c.toLowerCase() === n.toLowerCase())) {
+    if (SORTED_COLLECTIONS.some(c => c.toLowerCase() === n.toLowerCase())) {
       alert("Default collections are built into the app and can’t be deleted here.");
       return;
     }
@@ -1974,7 +2085,7 @@ export default function App() {
                   >
                     <option value="">(None)</option>
                     <optgroup label="Default collections">
-                      {DEFAULT_COLLECTIONS.map((c) => (
+                      {SORTED_COLLECTIONS.map((c) => (
                         <option key={"def-" + c} value={c}>{c}</option>
                       ))}
                     </optgroup>
@@ -2197,18 +2308,28 @@ export default function App() {
               + ` ${isDark ? "bg-slate-800 border-slate-700 hover:bg-slate-700" : "bg-white border-slate-300 hover:bg-slate-50"}`}
             value={sortMode}
             onChange={(e) => setSortMode(e.target.value)}
-            title="Sorting disables folder grouping"
+            title="Card sorts flatten the view; Collection sorts reorder folders only"
           >
             <option value="none">Default order (folders)</option>
-            <option value="name_asc">Name A→Z</option>
-            <option value="name_desc">Name Z→A</option>
-            <option value="tier_asc">Tier low→high</option>
-            <option value="tier_desc">Tier high→low</option>
-            <option value="created_new">Newest added</option>
-            <option value="created_old">Oldest added</option>
-            <option value="updated_new">Recently edited</option>
-            <option value="pages_desc">Pages high→low</option>
-            <option value="pages_asc">Pages low→high</option>
+
+            {/* Card-level sorts (flat) */}
+            <optgroup label="Cards">
+              <option value="name_asc">Name A→Z</option>
+              <option value="name_desc">Name Z→A</option>
+              <option value="tier_asc">Tier low→high</option>
+              <option value="tier_desc">Tier high→low</option>
+              <option value="created_new">Newest added</option>
+              <option value="created_old">Oldest added</option>
+              <option value="updated_new">Recently edited</option>
+              <option value="pages_desc">Pages high→low</option>
+              <option value="pages_asc">Pages low→high</option>
+            </optgroup>
+
+            {/* Collection-only sorts (stay grouped; just reorder sections) */}
+            <optgroup label="Collections">
+              <option value="collection_tier_asc">Collections by tier low→high</option>
+              <option value="collection_tier_desc">Collections by tier high→low</option>
+            </optgroup>
           </select>
 
           <label
@@ -2393,7 +2514,7 @@ export default function App() {
                 <option value="">Collection (no change)</option>
                 <option value="__clear__">— Clear collection —</option>
                 <optgroup label="Default">
-                  {DEFAULT_COLLECTIONS.map((c) => (
+                  {SORTED_COLLECTIONS.map((c) => (
                     <option key={"bdef-" + c} value={c}>{c}</option>
                   ))}
                 </optgroup>
@@ -2477,8 +2598,8 @@ export default function App() {
             <div className={isDark ? "text-gray-400" : "text-gray-500"}>Loading…</div>
           ) : filtered.length === 0 ? (
             <div className={isDark ? "text-gray-400" : "text-gray-500"}>No cards yet. Import PDFs above.</div>
-          ) : sortMode !== "none" ? (
-            // FLAT VIEW WHEN SORTING
+          ) : (isCardSort(sortMode) && sortMode !== "none") ? (   // ⬅️ changed
+            // FLAT VIEW WHEN CARD SORTING
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
               {sortedFlat.map(renderCardFactory(sortedFlat))}
             </div>
@@ -2637,7 +2758,7 @@ export default function App() {
       <CollectionsManager
         open={collectionsOpen}
         onClose={() => setCollectionsOpen(false)}
-        defaults={DEFAULT_COLLECTIONS}
+        defaults={SORTED_COLLECTIONS}
         custom={customCollections}
         onDelete={deleteCustomCollection}
         theme={theme}
@@ -2691,7 +2812,7 @@ function CollectionsManager({ open, onClose, defaults, custom, onDelete, theme }
         <div className="mb-4">
           <div className={`text-xs font-semibold mb-1 ${isDark ? "text-gray-300" : "text-gray-600"}`}>Default (built-in)</div>
           <div className="space-y-1">
-            {DEFAULT_COLLECTIONS.map(c => (
+            {SORTED_COLLECTIONS.map(c => (
               <div key={c} className="flex items-center justify-between text-sm">
                 <span>{c}</span>
                 <span className={isDark ? "text-gray-500" : "text-gray-400"}>(locked)</span>
