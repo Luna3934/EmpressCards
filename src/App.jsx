@@ -22,6 +22,11 @@ const metaStore = localforage.createInstance({ name: "pdf-card-binder-meta" });
 const fileStore = localforage.createInstance({ name: "pdf-card-binder-files" });
 const orderStore = localforage.createInstance({ name: "pdf-card-binder-order" });
 
+// Idle helper (fallbacks for Safari/Firefox)
+const ric = window.requestIdleCallback || ((cb) => setTimeout(() => cb({ timeRemaining: () => 0 }), 0));
+const cancelRic = window.cancelIdleCallback || clearTimeout;
+
+
 
 // ---- Tiers (hardcoded) ----
 const TIER_OPTIONS = [
@@ -167,6 +172,56 @@ function dbg(tag, ...args) {
   }).join(" ");
   pushDebugLine(`[${ts}] [${tag}] ${msg}`);
 }
+
+// ---- Lightweight PDF doc cache (LRU) ----
+const PdfCache = (() => {
+  const MAX = 6;                     // tune as you like
+  const map = new Map();             // id -> { pdf, ts }
+
+  function touch(id) {
+    const e = map.get(id);
+    if (e) { e.ts = Date.now(); }
+  }
+
+  function evictIfNeeded() {
+    if (map.size <= MAX) return;
+    const oldest = [...map.entries()].sort((a,b) => a[1].ts - b[1].ts)[0];
+    if (oldest) {
+      const [id, e] = oldest;
+      try { e.pdf?.destroy?.(); } catch {}
+      map.delete(id);
+    }
+  }
+
+  return {
+    get(id) { return map.get(id)?.pdf || null; },
+
+    async preload(id) {
+      // Only for PDFs in your library
+      const meta = await metaStore.getItem(id);
+      if (!meta || meta.kind === "gif") return null;
+
+      const cached = this.get(id);
+      if (cached) { touch(id); return cached; }
+
+      const raw = await fileStore.getItem(id);
+      const bytes = toUint8(raw);
+      if (!bytes?.length) return null;
+
+      const task = getDocument({ data: bytes });
+      const pdf = await task.promise;       // throws if bad
+      map.set(id, { pdf, ts: Date.now() });
+      evictIfNeeded();
+      return pdf;
+    },
+
+    evictAll() {
+      for (const [id, e] of map) { try { e.pdf?.destroy?.(); } catch {} }
+      map.clear();
+    }
+  };
+})();
+
 
 
 function toUint8(raw) {
@@ -638,7 +693,7 @@ function Lightbox({ open, onClose, fileBytes, name, theme }) {
 
 
 
-function MultiPageLightbox({ open, onClose, fileBytes, name, theme, onPrev, onNext, canPrev, canNext }) {
+function MultiPageLightbox({ open, onClose, fileBytes, pdfDoc, name, theme, onPrev, onNext, canPrev, canNext }) {
   const [pdf, setPdf] = React.useState(null);
   const [numPages, setNumPages] = React.useState(1);
   const [scale, setScale] = React.useState("fit");
@@ -665,9 +720,16 @@ function MultiPageLightbox({ open, onClose, fileBytes, name, theme, onPrev, onNe
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!open || !fileBytes) return;
+      if (!open) return;
       try {
-        const doc = await getDocument({ data: fileBytes }).promise;
+        let doc = null;
+        if (pdfDoc) {
+          doc = pdfDoc;               // use warmed instance
+        } else if (fileBytes) {
+          doc = await getDocument({ data: fileBytes }).promise;
+        } else {
+          return;
+        }
         if (cancelled) return;
         canvasesRef.current = [];
         setPdf(doc);
@@ -678,7 +740,7 @@ function MultiPageLightbox({ open, onClose, fileBytes, name, theme, onPrev, onNe
       }
     })();
     return () => { cancelled = true; setPdf(null); };
-  }, [open, fileBytes]);
+  }, [open, fileBytes, pdfDoc]);
 
   const fitScale = React.useCallback(async () => {
     if (!pdf) return 1;
@@ -720,13 +782,23 @@ function MultiPageLightbox({ open, onClose, fileBytes, name, theme, onPrev, onNe
   React.useEffect(() => {
     if (!pdf || !open) return;
     let cancelled = false;
-    (async () => {
-      for (let i = 1; i <= numPages && !cancelled; i++) {
-        await renderOne(i);
-      }
-    })();
-    return () => { cancelled = true; };
+    const idleHandles = [];
+
+    // 1) show first page immediately
+    renderOne(1);
+
+    // 2) render remaining pages when the browser is idle
+    for (let i = 2; i <= numPages; i++) {
+      const h = ric(() => { if (!cancelled) renderOne(i); });
+      idleHandles.push(h);
+    }
+
+    return () => {
+      cancelled = true;
+      idleHandles.forEach(cancelRic);
+    };
   }, [pdf, numPages, open, scale, renderOne]);
+
 
   React.useEffect(() => {
     if (!open || scale !== "fit") return;
@@ -1236,6 +1308,7 @@ export default function App() {
   const [activeCollection, setActiveCollection] = useState("");
   const [lightbox, setLightbox] = useState({ open: false, id: "" });
   const [lightboxBytes, setLightboxBytes] = useState(null);
+  const [lightboxPdf, setLightboxPdf] = useState(null); // PDFDocumentProxy | null
   const [importingCount, setImportingCount] = useState(0);
   const [lastError, setLastError] = useState("");
   const [customCollections, setCustomCollections] = useState([]);
@@ -2002,23 +2075,53 @@ export default function App() {
     }
   }
 
+  // Adjacent id helpers already exist: neighborId(id, dir)
+  function preloadId(id) {
+    if (!id) return;
+    const m = metas.find(x => x.id === id);
+    if (m?.kind === "pdf") { void PdfCache.preload(id); }
+  }
+  function preloadNeighbors(id) {
+    preloadId(id);
+    preloadId(neighborId(id, -1));
+    preloadId(neighborId(id, +1));
+  }
+
+
   async function openLightbox(id) {
     const meta = /** @type {CardMeta} */ (await metaStore.getItem(id));
-    const bytes = await fileStore.getItem(id);
 
     if (meta?.kind === "gif") {
       // ensure only one viewer is open
       setLightbox({ open: false, id: "" });
       setLightboxBytes(null);
-      setGifBytes(bytes);
+
+      // fetch GIF bytes, then show
+      const gifBytes = await fileStore.getItem(id);
+      setGifBytes(gifBytes);
       setGifState({ open: true, id });
-    } else {
-      setGifState({ open: false, id: "" });
-      setGifBytes(null);
-      setLightboxBytes(bytes);
-      setLightbox({ open: true, id });
+      return;
     }
+
+    // PDF path
+    setGifState({ open: false, id: "" });
+    setGifBytes(null);
+
+    // 1) open UI immediately
+    setLightbox({ open: true, id });
+
+    // 2) use cached doc if available, otherwise warm it
+    const cached = PdfCache.get(id);
+    const doc = cached || await PdfCache.preload(id);
+    setLightboxPdf(doc);
+
+    // 3) fetch bytes in the background for download/export use
+    fileStore.getItem(id).then((b) => setLightboxBytes(b));
+
+    // 4) warm neighbors
+    preloadNeighbors(id);
   }
+
 
 
   async function updateMeta(id, patch) {
@@ -2343,6 +2446,12 @@ export default function App() {
               alt={m.name}
               className={`w-full h-64 object-contain cursor-pointer ${isDark ? "bg-slate-900" : "bg-white"}`}
               draggable={false}
+              onMouseEnter={() => {
+              // 120ms debounce to avoid drive-by
+              clearTimeout(renderCardFactory._t);
+              renderCardFactory._t = setTimeout(() => preloadNeighbors(m.id), 120);
+            }}
+            onFocus={() => preloadNeighbors(m.id)} // keyboard users
             />
           </div>
 
@@ -3172,8 +3281,9 @@ export default function App() {
 
       <MultiPageLightbox
         open={lightbox.open}
-        onClose={() => setLightbox({ open: false, id: "" })}
+        onClose={() => { setLightbox({ open:false, id:"" }); setLightboxPdf(null); }}
         fileBytes={lightboxBytes}
+        pdfDoc={lightboxPdf}
         name={metas.find((m) => m.id === lightbox.id)?.name || ""}
         theme={theme}
         onPrev={() => goSibling(lightbox.id, -1)}
