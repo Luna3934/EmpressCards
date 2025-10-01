@@ -247,8 +247,16 @@ async function manualCheck() {
       return;
     }
 
-    const { ask } = await import("@tauri-apps/plugin-dialog");
-    const ok = await ask(`Install ${update.version}?`, { title: "Update available" });
+    let ok = true;
+    if (promptUser) {
+      try {
+        const { ask } = await import("@tauri-apps/plugin-dialog");
+        ok = await ask(`Install ${update.version}?`, { title: "Update available" });
+      } catch (e) {
+        dbg("updater", "dialog plugin not available, using window.confirm", String(e?.message || e));
+        ok = window.confirm(`Update available: ${update.version}\n\nInstall now?`);
+      }
+    }
     dbg("updater", "manualCheck: user decision", ok);
     if (!ok) return;
 
@@ -1158,6 +1166,17 @@ function SpaceBackdrop({ theme }) {
   );
 }
 
+async function confirmDialog(message, title = "Confirm") {
+  try {
+    if (isTauri()) {
+      const { ask } = await import("@tauri-apps/plugin-dialog");
+      return await ask(message, { title });
+    }
+  } catch {} // fall through to web confirm
+  return window.confirm(message);
+}
+
+
 
 
 export default function App() {
@@ -1274,6 +1293,87 @@ export default function App() {
   }, [autoTierFromCollection]);
 
 
+  // Add with other useState hooks
+  const [purgeCustomVisible, setPurgeCustomVisible] = useState(false);
+
+  // Show the button when Ctrl+Alt+Shift+D is pressed; hide with Esc
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.altKey && e.shiftKey && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        setPurgeCustomVisible(true);
+      }
+      if (e.key === "Escape" && purgeCustomVisible) setPurgeCustomVisible(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [purgeCustomVisible]);
+
+  async function bulkDeleteAllCustomCollections() {
+    const names = Array.isArray(customCollections) ? customCollections.slice() : [];
+    if (names.length === 0) {
+      showToast("No custom collections to delete.", "info");
+      setPurgeCustomVisible(false);
+      return;
+    }
+
+    const ok = await confirmDialog(
+      `Delete ALL ${names.length} custom collections?\nCards using them will be set to (None).`,
+      "Delete all custom collections"
+    );
+    if (!ok) return;
+
+    try {
+      // Build a case-insensitive set of normalized names
+      const delSet = new Set(
+        names.map(n => normalizeCollectionName(n).toLowerCase())
+      );
+
+      // 1) Reassign any cards using a soon-to-be-deleted custom collection
+      for (const m of metas) {
+        const col = normalizeCollectionName(m.collection || "");
+        if (delSet.has(col.toLowerCase())) {
+          await updateMeta(m.id, { collection: "" }); // (None)
+        }
+      }
+
+      // 2) Clear custom collections list
+      setCustomCollections([]);
+      await customCollectionStore.setItem("list", []);
+
+      // 3) Clean persisted order map entries for those groups
+      const nextOrder = { ...(orderMap || {}) };
+      for (const n of names) {
+        const k = keyForCollection(n);
+        delete nextOrder[k];
+      }
+      persistOrder(nextOrder);
+
+      // 4) Clean collapsed state for those groups
+      setCollapsed(prev => {
+        const copy = { ...(prev || {}) };
+        for (const n of names) {
+          const k = keyForCollection(n);
+          delete copy[k];
+        }
+        return copy;
+      });
+
+      // 5) Clear filter if it was set to a deleted custom collection
+      if (activeCollection && delSet.has(normalizeCollectionName(activeCollection).toLowerCase())) {
+        setActiveCollection("");
+      }
+
+      showToast(`Deleted ${names.length} custom collection${names.length > 1 ? "s" : ""}.`, "success");
+    } catch (e) {
+      console.error(e);
+      showToast("Failed to delete custom collections.", "error");
+    } finally {
+      setPurgeCustomVisible(false); // one-time button disappears
+    }
+  }
+
+
 
   useEffect(() => {
     const onBuf = (e) => setDebugLines(Array.isArray(e.detail) ? e.detail : readDebugBuffer());
@@ -1295,7 +1395,53 @@ export default function App() {
   }
 
   
-  
+  async function deleteSelectedWithConfirm() {
+  if (selectedIds.size === 0) {
+    showToast("No cards selected.", "info");
+    return;
+  }
+
+  const count = selectedIds.size;
+  const ok = await confirmDialog(
+    `Delete ${count} selected card${count > 1 ? "s" : ""}? This cannot be undone.`,
+    "Delete cards"
+  );
+  if (!ok) return;
+
+  await performBulkDelete();
+}
+
+
+  async function performBulkDelete() {
+    try {
+      setBulkApplying(true);
+
+      // Close any open viewers (in case a selected card is open)
+      setLightbox({ open: false, id: "" });
+      setGifState({ open: false, id: "" });
+      setGifBytes(null);
+      setLightboxBytes(null);
+
+      const ids = Array.from(selectedIds);
+      for (const id of ids) {
+        await remove(id);
+      }
+
+      setSelectedIds(new Set());
+      setBulkCollection("");
+      setBulkTier("");
+      setBulkFavorite("");
+
+      showToast(`Deleted ${ids.length} card${ids.length > 1 ? "s" : ""}.`, "success");
+    } catch (e) {
+      console.error(e);
+      showToast("Delete failed. See console for details.", "error");
+    } finally {
+      setBulkApplying(false);
+    }
+  }
+
+
 
   function showToast(message, kind = "info", ms = 2400) {
     setToast({ open: true, message, kind });
@@ -2711,16 +2857,16 @@ export default function App() {
               <span className="text-sm">
                 Selected: {selectedIds.size} / {visibleList.length}
               </span>
-              <button className={`px-2 py-1 border rounded ${isDark ? "border-slate-700 bg-slate-800 hover:bg-slate-700" : "border-slate-300 bg-white hover:bg-slate-50"}`} onClick={selectAllVisible}>
+              <button className={`px-2 py-1 border rounded cursor-pointer ${isDark ? "border-slate-700 bg-slate-800 hover:bg-slate-700" : "border-slate-300 bg-white hover:bg-slate-50"}`} onClick={selectAllVisible}>
                 Select all
               </button>
-              <button className={`px-2 py-1 border rounded ${isDark ? "border-slate-700 bg-slate-800 hover:bg-slate-700" : "border-slate-300 bg-white hover:bg-slate-50"}`} onClick={clearSelection}>
+              <button className={`px-2 py-1 border rounded cursor-pointer ${isDark ? "border-slate-700 bg-slate-800 hover:bg-slate-700" : "border-slate-300 bg-white hover:bg-slate-50"}`} onClick={clearSelection}>
                 Clear selection
               </button>
 
               {/* Bulk Collection */}
               <select
-                className={`border rounded-xl px-3 py-2 ${isDark ? "bg-slate-800 border-slate-700 hover:bg-slate-700" : "bg-white border-slate-300 hover:bg-slate-50"}`}
+                className={`border rounded-xl px-3 py-2 cursor-pointer ${isDark ? "bg-slate-800 border-slate-700 hover:bg-slate-700" : "bg-white border-slate-300 hover:bg-slate-50"}`}
                 value={bulkCollection}
                 onChange={async (e) => {
                   const v = e.target.value;
@@ -2774,7 +2920,7 @@ export default function App() {
               {/* Bulk Tier */}
               <select
                 className={
-                  `border rounded-xl px-3 py-2 ` +
+                  `border rounded-xl px-3 py-2 cursor-pointer` +
                   (autoTierFromCollection
                     ? `${isDark ? "bg-slate-800/50 border-slate-700 text-slate-400" : "bg-gray-50 border-slate-300 text-gray-400"} cursor-not-allowed`
                     : `${isDark ? "bg-slate-800 border-slate-700 hover:bg-slate-700" : "bg-white border-slate-300 hover:bg-slate-50"} cursor-pointer`)
@@ -2794,7 +2940,7 @@ export default function App() {
 
               {/* Bulk Favorite */}
               <select
-                className={`border rounded-xl px-3 py-2 ${isDark ? "bg-slate-800 border-slate-700 hover:bg-slate-700" : "bg-white border-slate-300 hover:bg-slate-50"}`}
+                className={`border rounded-xl px-3 py-2 cursor-pointer ${isDark ? "bg-slate-800 border-slate-700 hover:bg-slate-700" : "bg-white border-slate-300 hover:bg-slate-50"}`}
                 value={bulkFavorite}
                 onChange={(e) => setBulkFavorite(e.target.value)}
                 title="Set or unset favorite for selected"
@@ -2805,12 +2951,20 @@ export default function App() {
               </select>
 
               <button
-                className="px-3 py-2 rounded-xl border bg-blue-600 text-white hover:bg-slate-700"
+                className={`border rounded-xl px-3 py-2 cursor-pointer ${isDark ? "border-slate-700 bg-slate-800 hover:bg-slate-700" : "border-slate-300 bg-white hover:bg-slate-50"}`}
+                onClick={deleteSelectedWithConfirm}
+              >
+                Delete
+              </button>
+
+
+              <button
+                className="px-3 py-2 rounded-xl border bg-blue-600 text-white cursor-pointer hover:bg-slate-700"
                 onClick={applyBulk}
                 disabled={selectedIds.size === 0 || bulkApplying}
                 title="Apply selected bulk changes"
               >
-                {bulkApplying ? "Applying…" : "Apply to selected"}
+                {bulkApplying ? "Applying…" : "Apply"}
               </button>
 
             </div>
@@ -3076,6 +3230,23 @@ export default function App() {
         </div>
       </div>
 
+      {purgeCustomVisible && (
+      <div className="fixed bottom-6 left-6 z-[200]">
+        <button
+          onClick={bulkDeleteAllCustomCollections}
+          className={`px-4 py-2 rounded-xl border shadow
+            ${isDark
+              ? "bg-rose-900/30 border-rose-700 text-rose-100 hover:bg-rose-900/50"
+              : "bg-rose-50 border-rose-300 text-rose-700 hover:bg-rose-100"}`}
+          title="Delete all custom collections (one-time button)"
+        >
+          ⚠️ Delete ALL custom collections
+        </button>
+        <div className={`${isDark ? "text-gray-400" : "text-gray-500"} text-xs mt-1`}>
+          Press Esc to cancel / hide
+        </div>
+      </div>
+    )}
 
     </div>
 
