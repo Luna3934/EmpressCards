@@ -682,9 +682,9 @@ function Lightbox({ open, onClose, fileBytes, name, theme }) {
           <button className="px-3 py-1 rounded bg-white/10 hover:bg-white/20" onClick={onClose}>Close</button>
         </div>
       </div>
-      <div className="flex-1 flex items-center justify-center px-6 pb-6" onClick={(e) => e.stopPropagation()}>
+      <div className="flex-1 flex items-center justify-center px-6 pb-6">
         <div className={`shadow-2xl rounded ${isDark ? "bg-slate-900" : "bg-white"}`}>
-          <canvas ref={canvasRef} />
+          <canvas ref={canvasRef} onClick={(e) => e.stopPropagation()} />
         </div>
       </div>
     </div>
@@ -827,7 +827,7 @@ function MultiPageLightbox({ open, onClose, fileBytes, pdfDoc, name, theme, onPr
                   w-12 h-12 md:w-14 md:h-14
                   rounded-full text-2xl md:text-3xl leading-none
                   bg-white/15 hover:bg-white/25 text-white shadow-lg backdrop-blur
-                  flex items-center justify-center
+                  flex items-center justify-center cursor-pointer
                   disabled:opacity-40 focus:outline-none focus-visible:ring focus-visible:ring-white/50"
         onClick={(e) => { e.stopPropagation(); onPrev?.(); }}
         disabled={!canPrev}
@@ -839,7 +839,7 @@ function MultiPageLightbox({ open, onClose, fileBytes, pdfDoc, name, theme, onPr
                   w-12 h-12 md:w-14 md:h-14
                   rounded-full text-2xl md:text-3xl leading-none
                   bg-white/15 hover:bg-white/25 text-white shadow-lg backdrop-blur
-                  flex items-center justify-center
+                  flex items-center justify-center cursor-pointer
                   disabled:opacity-40 focus:outline-none focus-visible:ring focus-visible:ring-white/50"
         onClick={(e) => { e.stopPropagation(); onNext?.(); }}
         disabled={!canNext}
@@ -866,7 +866,6 @@ function MultiPageLightbox({ open, onClose, fileBytes, pdfDoc, name, theme, onPr
       <div
         ref={containerRef}
         className="flex-1 overflow-auto px-6 pb-6"
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="mx-auto w-max space-y-6">
           {Array.from({ length: numPages }).map((_, idx) => (
@@ -874,6 +873,7 @@ function MultiPageLightbox({ open, onClose, fileBytes, pdfDoc, name, theme, onPr
               key={idx}
               ref={(el) => { canvasesRef.current[idx + 1] = el; }}
               className={`block shadow-2xl rounded ${isDark ? "bg-slate-900" : "bg-white"}`}
+              onClick={(e) => e.stopPropagation()}
             />
           ))}
         </div>
@@ -1049,7 +1049,6 @@ function GifLightbox({ open, onClose, fileBytes, name, theme, onPrev, onNext, ca
       <div
         ref={containerRef}
         className="flex-1 flex items-center justify-center px-6 pb-6"
-        onClick={(e) => e.stopPropagation()}
       >
         <div className={`shadow-2xl rounded ${isDark ? "bg-slate-900" : "bg-white"} overflow-hidden`}>
           {url && (
@@ -1061,6 +1060,7 @@ function GifLightbox({ open, onClose, fileBytes, name, theme, onPrev, onNext, ca
               style={imgStyle}
               className={`${isDark ? "bg-slate-900" : "bg-white"} block`}
               draggable={false}
+              onClick={(e) => e.stopPropagation()}
             />
           )}
         </div>
