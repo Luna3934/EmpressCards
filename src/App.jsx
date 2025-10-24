@@ -66,6 +66,8 @@ const DEFAULT_COLLECTIONS = [
   "Immortal Cat Imperial Court",
   "Immortal Fragments",
   "Empress’ Favor Notes",
+  "Astral Testament",
+  "Hairpins",
 ];
 
 // Hoisted version — safe to use earlier in the file
@@ -107,6 +109,8 @@ const COLLECTION_DEFAULT_TIER_RAW = {
   "Jade-Antler Mooncrest" : "Immortal",
   "Jade Cat Private Garden" : "Jade",
   "Immortal Cat Imperial Court" : "Immortal",
+  "Astral Testament" : "Sovereign",
+  "Hairpins" : "Immortal",
 };
 
 /** Build a normalized lookup so "  Celestial  Oath " works the same. */
