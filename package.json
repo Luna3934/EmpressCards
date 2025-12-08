@@ -1,7 +1,7 @@
 {
   "name": "empire_card_collection",
   "private": true,
-  "version": "0.2.2",
+  "version": "1.1.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
