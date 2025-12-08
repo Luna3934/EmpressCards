@@ -68,6 +68,11 @@ const DEFAULT_COLLECTIONS = [
   "Empress’ Favor Notes",
   "Astral Testament",
   "Hairpins",
+  "Cozy Court",
+  "Cozy Solstice Signs",
+  "Samharian Ladies",
+  "Celestial Foxfire",
+  "Spicy Cat Princess",
 ];
 
 // Hoisted version — safe to use earlier in the file
@@ -110,7 +115,6 @@ const COLLECTION_DEFAULT_TIER_RAW = {
   "Jade Cat Private Garden" : "Jade",
   "Immortal Cat Imperial Court" : "Immortal",
   "Astral Testament" : "Sovereign",
-  "Hairpins" : "Immortal",
 };
 
 /** Build a normalized lookup so "  Celestial  Oath " works the same. */
@@ -124,6 +128,30 @@ const COLLECTION_DEFAULT_TIER = Object.fromEntries(
 function defaultTierForCollection(name) {
   const t = COLLECTION_DEFAULT_TIER[keyForCollection(name)];
   return TIER_OPTIONS.includes(t) ? t : "";
+}
+
+/** Map a collection name → its default NSFW status (case/whitespace-insensitive). */
+const COLLECTION_DEFAULT_NSFW_RAW = {
+  // Add collection names here that should auto-mark as NSFW, e.g.:
+  // "Adult Collection": true,
+  // "Mature Artwork": true,
+  "Cozy Court": true,
+  "Cozy Solstice Signs": true,
+  "Samharian Ladies": true,
+  "Celestial Foxfire": true,
+  "Spicy Cat Princess": true,
+};
+
+/** Build a normalized lookup so "  Adult  Collection " works the same. */
+const COLLECTION_DEFAULT_NSFW = Object.fromEntries(
+  Object.entries(COLLECTION_DEFAULT_NSFW_RAW).map(([k, v]) => [
+    keyForCollection(k), v
+  ])
+);
+
+/** Return NSFW status for a given collection name (or false if none). */
+function defaultNsfwForCollection(name) {
+  return COLLECTION_DEFAULT_NSFW[keyForCollection(name)] === true;
 }
 
 
@@ -141,10 +169,12 @@ const customCollectionStore = localforage.createInstance({
 });
 
 // Types
-/** @typedef {{ id: string; name: string; pages: number; tags: string[]; collection?: string; thumbnailDataUrl: string; createdAt: number; updatedAt: number; tier?: string; favorite?: boolean; kind?: "pdf" | "gif"}} CardMeta */
+/** @typedef {{ id: string; name: string; pages: number; tags: string[]; collection?: string; thumbnailDataUrl: string; createdAt: number; updatedAt: number; tier?: string; favorite?: boolean; kind?: "pdf" | "gif" | "image"; nsfw?: boolean; origExt?: string; mime?: string}} CardMeta */
 
 const THEME_KEY = "pcb-theme"; // 'light' | 'dark'
 const AUTO_TIER_KEY = "pcb-auto-tier"; // '1' = on, '0' = off
+const NSFW_MODE_KEY = "pcb-nsfw-mode"; // '1' = on, '0' = off
+const AUTO_NSFW_RELEASE_MIGRATION_KEY = "pcb-auto-nsfw-release-migration-v1"; // one-time migration marker
 const DEBUG_DND = false;
 const d = (...args) => { if (DEBUG_DND) console.log("[DND]", ...args); };
 
@@ -203,7 +233,7 @@ const PdfCache = (() => {
     async preload(id) {
       // Only for PDFs in your library
       const meta = await metaStore.getItem(id);
-      if (!meta || meta.kind === "gif") return null;
+        if (!meta || meta.kind === "gif" || meta.kind === "image") return null;
 
       const cached = this.get(id);
       if (cached) { touch(id); return cached; }
@@ -548,13 +578,14 @@ function DropZone({ onFiles, theme }) {
       onDrop={(e) => {
         e.preventDefault(); setOver(false);
         const files = Array.from(e.dataTransfer.files).filter((f) => {
-          const nameOk = f.name?.toLowerCase().endsWith(".pdf");
-          const typeOk = (f.type || "").toLowerCase().includes("pdf");
           const name = (f.name || "").toLowerCase();
           const type = (f.type || "").toLowerCase();
           const isPdf = name.endsWith(".pdf") || type.includes("pdf");
           const isGif = name.endsWith(".gif") || type === "image/gif";
-          return isPdf || isGif;
+          const isPng = name.endsWith(".png") || type === "image/png";
+          const isJpg = name.endsWith(".jpg") || name.endsWith(".jpeg") || type === "image/jpeg";
+          const isImg = isGif || isPng || isJpg;
+          return isPdf || isImg;
         });
         if (files.length) onFiles(files);
       }}
@@ -567,7 +598,7 @@ function DropZone({ onFiles, theme }) {
       <input
         ref={inputRef}
         type="file"
-        accept=".pdf,application/pdf,.gif,image/gif"
+        accept=".pdf,application/pdf,.gif,image/gif,.png,image/png,.jpg,.jpeg,image/jpeg"
         multiple
         className="hidden"
         onChange={(e) => {
@@ -697,7 +728,7 @@ function Lightbox({ open, onClose, fileBytes, name, theme }) {
 
 
 
-function MultiPageLightbox({ open, onClose, fileBytes, pdfDoc, name, theme, onPrev, onNext, canPrev, canNext }) {
+function MultiPageLightbox({ open, onClose, fileBytes, pdfDoc, name, theme, onPrev, onNext, canPrev, canNext, isNsfw, nsfwMode }) {
   const [pdf, setPdf] = React.useState(null);
   const [numPages, setNumPages] = React.useState(1);
   const [scale, setScale] = React.useState("fit");
@@ -876,7 +907,7 @@ function MultiPageLightbox({ open, onClose, fileBytes, pdfDoc, name, theme, onPr
             <canvas
               key={idx}
               ref={(el) => { canvasesRef.current[idx + 1] = el; }}
-              className={`block shadow-2xl rounded ${isDark ? "bg-slate-900" : "bg-white"}`}
+              className={`block shadow-2xl rounded ${isDark ? "bg-slate-900" : "bg-white"} ${isNsfw && !nsfwMode ? "blur-xl" : ""}`}
               onClick={(e) => e.stopPropagation()}
             />
           ))}
@@ -887,7 +918,7 @@ function MultiPageLightbox({ open, onClose, fileBytes, pdfDoc, name, theme, onPr
 }
 
 
-function GifLightbox({ open, onClose, fileBytes, name, theme, onPrev, onNext, canPrev, canNext }) {
+function GifLightbox({ open, onClose, fileBytes, name, theme, onPrev, onNext, canPrev, canNext, fileMime, isNsfw, nsfwMode }) {
   const [url, setUrl] = React.useState("");
   const [scale, setScale] = React.useState("fit"); // "fit" or number
   const [fitTick, setFitTick] = React.useState(0); // bump to recompute fit after layout/load
@@ -913,7 +944,7 @@ function GifLightbox({ open, onClose, fileBytes, name, theme, onPrev, onNext, ca
 
   React.useEffect(() => {
     if (!open || !fileBytes) return;
-    const blob = new Blob([fileBytes], { type: "image/gif" });
+    const blob = new Blob([fileBytes], { type: fileMime || "image/gif" });
     const u = URL.createObjectURL(blob);
     setUrl(u);
     setScale("fit");
@@ -1062,7 +1093,7 @@ function GifLightbox({ open, onClose, fileBytes, name, theme, onPrev, onNext, ca
               alt={name}
               onLoad={handleImgLoad}
               style={imgStyle}
-              className={`${isDark ? "bg-slate-900" : "bg-white"} block`}
+              className={`${isDark ? "bg-slate-900" : "bg-white"} block ${isNsfw && !nsfwMode ? "blur-xl" : ""}`}
               draggable={false}
               onClick={(e) => e.stopPropagation()}
             />
@@ -1326,6 +1357,7 @@ export default function App() {
   const [bulkCollection, setBulkCollection] = useState("");
   const [bulkTier, setBulkTier] = useState("");
   const [bulkFavorite, setBulkFavorite] = useState("");
+  const [bulkNsfw, setBulkNsfw] = useState("");
   const [reorderMode, setReorderMode] = useState(false);
 
   // Persisted per-group order
@@ -1369,6 +1401,42 @@ export default function App() {
     try { localStorage.setItem(AUTO_TIER_KEY, autoTierFromCollection ? "1" : "0"); } catch {}
   }, [autoTierFromCollection]);
 
+  const [autoNsfwFromCollection, setAutoNsfwFromCollection] = useState(() => {
+    try { return localStorage.getItem("pcb-auto-nsfw") !== "0"; } catch { return false; } // default OFF
+  });
+  useEffect(() => {
+    try { localStorage.setItem("pcb-auto-nsfw", autoNsfwFromCollection ? "1" : "0"); } catch {}
+  }, [autoNsfwFromCollection]);
+
+  // One-time release migration: ensure existing cards are not marked NSFW when this
+  // feature ships. This runs once (per-install) and sets `nsfw: false` for all
+  // metas currently in the store, then records a migration marker so it won't run again.
+  useEffect(() => {
+    if (loading) return; // wait until metas are loaded
+    try {
+      if (localStorage.getItem(AUTO_NSFW_RELEASE_MIGRATION_KEY)) return; // already ran
+
+      (async () => {
+        try {
+          // iterate all metas and set nsfw=false for each existing card
+          for (const m of metas) {
+            const meta = { ...m };
+            // Only write if needed to avoid unnecessary writes
+            if (meta.nsfw !== false) {
+              meta.nsfw = false;
+              meta.updatedAt = Date.now();
+              await metaStore.setItem(meta.id, meta);
+              try { upsert(meta); } catch {}
+            }
+          }
+          // mark migration complete
+          try { localStorage.setItem(AUTO_NSFW_RELEASE_MIGRATION_KEY, String(Date.now())); } catch {}
+        } catch (e) {
+          console.error("Auto-NSFW release migration failed:", e);
+        }
+      })();
+    } catch (e) {}
+  }, [loading, metas, upsert]);
 
   // Add with other useState hooks
   const [purgeCustomVisible, setPurgeCustomVisible] = useState(false);
@@ -1557,6 +1625,14 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem("pcb-edit", editMode ? "1" : "0");
   }, [editMode]);
+
+  // NSFW mode state and persistence
+  const [nsfwMode, setNsfwMode] = useState(() => {
+    try { return localStorage.getItem(NSFW_MODE_KEY) === "1"; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(NSFW_MODE_KEY, nsfwMode ? "1" : "0"); } catch {}
+  }, [nsfwMode]);
 
   // Global OS file-drop shield
   useEffect(() => {
@@ -1878,6 +1954,10 @@ export default function App() {
     if (bulkFavorite === "true") basePatch.favorite = true;
     if (bulkFavorite === "false") basePatch.favorite = false;
 
+    // Bulk NSFW is global
+    if (bulkNsfw === "true") basePatch.nsfw = true;
+    if (bulkNsfw === "false") basePatch.nsfw = false;
+
     const ids = Array.from(selectedIds);
 
     // Apply per-card, so we can compute tier suggestions only for untiered cards
@@ -1909,6 +1989,28 @@ export default function App() {
         }
       }
 
+      // If the user explicitly set/cleared a bulk NSFW, honor it
+      if (bulkNsfw === "__clear__") {
+        patch.nsfw = false;
+      } else if (bulkNsfw && bulkNsfw !== "__keep__") {
+        patch.nsfw = bulkNsfw === "true"; // user-picked NSFW wins
+      } else {
+        // No explicit bulk NSFW — maybe auto-suggest from collection
+        // Only do this if:
+        // - auto-NSFW toggle is ON
+        // - a collection is being set (not cleared)
+        // - this card currently has no NSFW setting
+        if (autoNsfwFromCollection &&
+            typeof basePatch.collection === "string" &&
+            basePatch.collection.trim() !== "" &&
+            !("nsfw" in existing)) {
+          const suggested = defaultNsfwForCollection(basePatch.collection);
+          if (suggested) {
+            patch.nsfw = suggested;
+          }
+        }
+      }
+
       // Now use your existing updater (it still normalizes, clamps, etc.)
       await updateMeta(id, patch);
     }));
@@ -1920,6 +2022,7 @@ export default function App() {
     setBulkCollection("");
     setBulkTier("");
     setBulkFavorite("");
+    setBulkNsfw("");
     setBulkApplying(false);
   }
 
@@ -2005,8 +2108,11 @@ export default function App() {
         const typeLower = (file.type || "").toLowerCase();
         const isPdf = nameLower.endsWith(".pdf") || typeLower.includes("pdf");
         const isGif = nameLower.endsWith(".gif") || typeLower === "image/gif";
-        
-        let kind = isGif ? "gif" : "pdf"; // default to pdf if unknown
+        const isPng = nameLower.endsWith(".png") || typeLower === "image/png";
+        const isJpg = nameLower.endsWith(".jpg") || nameLower.endsWith(".jpeg") || typeLower === "image/jpeg";
+        const isImg = isGif || isPng || isJpg;
+
+        let kind = isPdf ? "pdf" : isImg ? "image" : "pdf"; // prefer image for images (gif included)
 
         let dataUrl = "";
         let numPages = 1;
@@ -2016,8 +2122,9 @@ export default function App() {
             dataUrl = r.dataUrl;
             numPages = r.numPages;
           } else {
-            // GIF: make a thumbnail from the first frame
-            const blob = new Blob([renderBytes], { type: "image/gif" });
+            // Image (GIF, PNG, JPG): make a thumbnail from the first frame / image
+            const mime = file.type || (isJpg ? "image/jpeg" : isPng ? "image/png" : isGif ? "image/gif" : "image/png");
+            const blob = new Blob([renderBytes], { type: mime });
             const url = URL.createObjectURL(blob);
             const img = new Image();
             await new Promise((res, rej) => {
@@ -2037,7 +2144,7 @@ export default function App() {
             ctx.drawImage(img, x, y, w, h);
             dataUrl = canvas.toDataURL("image/png");
             URL.revokeObjectURL(url);
-            numPages = 1; // not relevant for GIF
+            numPages = 1; // single-page for images
           }
         } catch (renderErr) {
           console.error("Thumbnail render failed, using placeholder", renderErr);
@@ -2053,9 +2160,14 @@ export default function App() {
         }
 
         const id = uuidv4();
+        // original extension (for correct download filename) and mime
+        const extMatch = (file.name || "").match(/\.([a-z0-9]+)$/i);
+        const origExt = extMatch ? (extMatch[1] || "").toLowerCase() : (kind === "pdf" ? "pdf" : "png");
+        const mime = file.type || (origExt === "jpg" || origExt === "jpeg" ? "image/jpeg" : origExt === "png" ? "image/png" : origExt === "gif" ? "image/gif" : origExt === "pdf" ? "application/pdf" : "");
+
         const meta = {
           id,
-          name: file.name.replace(/\.(pdf|gif)$/i, ""),
+          name: file.name.replace(/\.(pdf|gif|png|jpe?g)$/i, ""),
           pages: numPages,
           tags: [],
           collection: "",
@@ -2064,7 +2176,9 @@ export default function App() {
           updatedAt: Date.now(),
           tier: "",
           favorite: false,
-          kind,
+          kind: kind === "image" && isGif ? "gif" : (kind === "image" ? "image" : "pdf"),
+          origExt,
+          mime,
         };
 
         await fileStore.setItem(id, bytes);
@@ -2095,7 +2209,7 @@ export default function App() {
   async function openLightbox(id) {
     const meta = /** @type {CardMeta} */ (await metaStore.getItem(id));
 
-    if (meta?.kind === "gif") {
+    if (meta?.kind === "gif" || meta?.kind === "image") {
       // ensure only one viewer is open
       setLightbox({ open: false, id: "" });
       setLightboxBytes(null);
@@ -2132,16 +2246,25 @@ export default function App() {
     const existing = /** @type {CardMeta} */ (await metaStore.getItem(id));
     let p = { ...patch };
 
-    // If collection is being changed, normalize it and maybe auto-tier
+    // If collection is being changed, normalize it and maybe auto-tier/auto-nsfw
     if (Object.prototype.hasOwnProperty.call(p, "collection")) {
       p.collection = normalizeCollectionName(p.collection);
 
-      // new: always set suggested tier on collection change
+      // auto-tier on collection change
       // unless the caller explicitly provided a tier in the patch
       if (autoTierFromCollection) {
         const suggested = defaultTierForCollection(p.collection);
         if (suggested && !("tier" in p)) {
           p.tier = suggested;
+        }
+      }
+
+      // auto-NSFW on collection change
+      // unless the caller explicitly provided nsfw in the patch
+      if (autoNsfwFromCollection) {
+        const suggested = defaultNsfwForCollection(p.collection);
+        if (suggested && !("nsfw" in p)) {
+          p.nsfw = suggested;
         }
       }
 
@@ -2448,7 +2571,7 @@ export default function App() {
             <img
               src={m.thumbnailDataUrl}
               alt={m.name}
-              className={`w-full h-64 object-contain cursor-pointer ${isDark ? "bg-slate-900" : "bg-white"}`}
+              className={`w-full h-64 object-contain cursor-pointer ${isDark ? "bg-slate-900" : "bg-white"} ${m.nsfw && !nsfwMode ? "blur-xl" : ""}`}
               draggable={false}
               onMouseEnter={() => {
               // 120ms debounce to avoid drive-by
@@ -2478,8 +2601,8 @@ export default function App() {
                             ${isDark ? "hover:bg-slate-800 text-gray-300" : "hover:bg-gray-100 text-gray-500"}
                             focus:outline-none focus-visible:ring`}
                 onClick={(e) => { e.stopPropagation(); downloadCard(m.id); }}
-                title={`Download ${m.kind === "gif" ? "GIF" : "PDF"}`}
-                aria-label={`Download ${m.kind === "gif" ? "GIF" : "PDF"}`}
+                title={`Download ${m.kind === "gif" ? "GIF" : m.kind === "image" ? "Image" : "PDF"}`}
+                aria-label={`Download ${m.kind === "gif" ? "GIF" : m.kind === "image" ? "Image" : "PDF"}`}
               >
                 ⬇️
               </button>
@@ -2584,6 +2707,16 @@ export default function App() {
 
 
                 <TagEditor value={m.tags} onChange={(tags) => updateMeta(m.id, { tags })} theme={theme} />
+
+                <label className={`mt-2 flex items-center gap-2 px-2 py-1 rounded-md border cursor-pointer
+                  ${isDark ? "border-slate-700 bg-slate-800 hover:bg-slate-700" : "border-slate-300 bg-white hover:bg-slate-50"}`}>
+                  <input
+                    type="checkbox"
+                    checked={m.nsfw || false}
+                    onChange={(e) => updateMeta(m.id, { nsfw: e.target.checked })}
+                  />
+                  <span className="text-sm">Mark as NSFW</span>
+                </label>
 
                 <div className="flex items-center justify-between mt-3">
                   <div className="flex gap-2">
@@ -2706,9 +2839,11 @@ export default function App() {
         return;
       }
 
-      const ext  = meta.kind === "gif" ? "gif" : "pdf";
-      const mime = ext === "gif" ? "image/gif" : "application/pdf";
       const safe = (meta.name || "card").replace(/[^\w\-]+/g, "_");
+
+      // Prefer original extension/mime if available (images: png/jpg/gif), otherwise fall back
+      const ext = meta.origExt || (meta.kind === "gif" ? "gif" : meta.kind === "image" ? "png" : "pdf");
+      const mime = meta.mime || (meta.kind === "gif" ? "image/gif" : meta.kind === "image" ? "image/png" : "application/pdf");
 
       const blob = new Blob([bytes], { type: mime });
       const url  = URL.createObjectURL(blob);
@@ -2888,6 +3023,37 @@ export default function App() {
             Auto-select tier
           </label>
 
+          <label
+            className={`px-3 py-2 rounded-xl border cursor-pointer
+              ${autoNsfwFromCollection
+                ? (isDark ? "bg-rose-900/20 border-rose-700" : "bg-rose-50 border-rose-300")
+                : (isDark ? "border-slate-700 hover:bg-slate-700" : "border-slate-300 hover:bg-slate-50")}`}
+            title="When you change a card's collection, auto-set its NSFW status from the collection's default (only if the card is not already marked NSFW)."
+          >
+            <input
+              type="checkbox"
+              className="mr-2"
+              checked={autoNsfwFromCollection}
+              onChange={(e) => setAutoNsfwFromCollection(e.target.checked)}
+            />
+            Auto-set NSFW
+          </label>
+
+          <label
+            className={`px-3 py-2 rounded-xl border cursor-pointer
+              ${nsfwMode
+                ? (isDark ? "bg-red-900/20 border-red-700" : "bg-red-50 border-red-300")
+                : (isDark ? "border-slate-700 hover:bg-slate-700" : "border-slate-300 hover:bg-slate-50")}`}
+            title="Show NSFW-tagged images unblurred"
+          >
+            <input
+              type="checkbox"
+              className="mr-2"
+              checked={nsfwMode}
+              onChange={(e) => setNsfwMode(e.target.checked)}
+            />
+            NSFW Mode
+          </label>
 
           {sortMode === "none" && (
               <>
@@ -2911,10 +3077,10 @@ export default function App() {
           <div className="auto flex flex-wrap items-center gap-2">
             
             <label className={`px-3 py-2 rounded-xl border cursor-pointer ${isDark ? "border-slate-700 bg-slate-800 hover:bg-slate-700" : "border-slate-300 bg-white hover:bg-slate-50"}`}>
-              Add PDFs
+              Add files
               <input
                 type="file"
-                accept="application/pdf"
+                accept=".pdf,application/pdf,.gif,image/gif,.png,image/png,.jpg,.jpeg,image/jpeg"
                 multiple
                 className="hidden"
                 onChange={(e) => {
@@ -3011,6 +3177,16 @@ export default function App() {
                       setBulkTier(suggested || ""); // empty if no mapping
                     }
                   }
+
+                  // ⬇️ Prefill Bulk NSFW based on collection (only when auto-NSFW is enabled)
+                  if (autoNsfwFromCollection) {
+                    if (!v || v === "__clear__" || v === "__keep__") {
+                      // don't touch the user's current NSFW choice when clearing/keeping
+                    } else {
+                      const suggested = defaultNsfwForCollection(v);
+                      setBulkNsfw(suggested ? "true" : ""); // empty if no mapping
+                    }
+                  }
                 }}
                 title="Set or clear collection for selected"
               >
@@ -3061,6 +3237,18 @@ export default function App() {
                 <option value="">Favorite (no change)</option>
                 <option value="true">Set favorite ★</option>
                 <option value="false">Unset favorite ☆</option>
+              </select>
+
+              {/* Bulk NSFW */}
+              <select
+                className={`border rounded-xl px-3 py-2 cursor-pointer ${isDark ? "bg-slate-800 border-slate-700 hover:bg-slate-700" : "bg-white border-slate-300 hover:bg-slate-50"}`}
+                value={bulkNsfw}
+                onChange={(e) => setBulkNsfw(e.target.value)}
+                title="Mark or unmark as NSFW for selected"
+              >
+                <option value="">NSFW (no change)</option>
+                <option value="true">Mark NSFW 🔞</option>
+                <option value="false">Unmark NSFW</option>
               </select>
 
               <button
@@ -3294,6 +3482,8 @@ export default function App() {
         onNext={() => goSibling(lightbox.id, +1)}
         canPrev={canPrevId(lightbox.id)}
         canNext={canNextId(lightbox.id)}
+        isNsfw={metas.find((m) => m.id === lightbox.id)?.nsfw || false}
+        nsfwMode={nsfwMode}
       />
 
       <GifLightbox
@@ -3306,6 +3496,9 @@ export default function App() {
         onNext={() => goSibling(gifState.id, +1)}
         canPrev={canPrevId(gifState.id)}
         canNext={canNextId(gifState.id)}
+        fileMime={metas.find((m) => m.id === gifState.id)?.mime || "image/gif"}
+        isNsfw={metas.find((m) => m.id === gifState.id)?.nsfw || false}
+        nsfwMode={nsfwMode}
       />
 
 
