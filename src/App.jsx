@@ -544,6 +544,27 @@ function useLocalMeta() {
     setMetas((prev) => prev.filter((m) => m.id !== id));
   }
 
+  // Safe remove with timeout to avoid hangs in packaged apps
+  async function safeRemove(id, timeoutMs = 10000) {
+    const op = (async () => {
+      await metaStore.removeItem(id);
+      await fileStore.removeItem(id);
+      setMetas((prev) => prev.filter((m) => m.id !== id));
+    })();
+    // timeout helper
+    const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('remove timeout')), timeoutMs));
+    try {
+      await Promise.race([op, timeout]);
+    } catch (e) {
+      console.error(`safeRemove failed for ${id}:`, e);
+      // Try best-effort cleanup without blocking
+      try { await metaStore.removeItem(id); } catch (e2) { console.error('metaStore.removeItem retry failed', e2); }
+      try { await fileStore.removeItem(id); } catch (e3) { console.error('fileStore.removeItem retry failed', e3); }
+      // Still remove from in-memory list so UI doesn't hang
+      setMetas((prev) => prev.filter((m) => m.id !== id));
+    }
+  }
+
   return { metas, loading, upsert, remove };
 }
 
@@ -1569,7 +1590,8 @@ export default function App() {
 
       const ids = Array.from(selectedIds);
       for (const id of ids) {
-        await remove(id);
+        // use safeRemove to avoid indefinite hangs in packaged apps
+        await safeRemove(id);
       }
 
       setSelectedIds(new Set());
@@ -2324,6 +2346,68 @@ export default function App() {
     } catch (err) {
       console.error("Export failed", err);
       showToast("Export failed. See console for details.", "error");
+    }
+  }
+
+  // Export archive using Tauri-native zip (writes files to temp then asks Rust to zip)
+  async function exportArchiveAll() {
+    if (!isTauri()) {
+      showToast("Export archive is only available in the desktop app.", "info");
+      return;
+    }
+    try {
+      const { mkdir, writeFile, BaseDirectory } = await import('@tauri-apps/plugin-fs');
+      const { tempDir } = await import('@tauri-apps/api/path');
+      const { invoke } = await import('@tauri-apps/api/core');
+
+      const tmpBase = await tempDir();
+      const relDir = `empire-export-${Date.now()}`;
+      const relPath = `empire_exports/${relDir}`;
+
+      // Ensure temp subdirs via fs API (relative to BaseDirectory.Temp)
+      await mkdir(relPath, { dir: BaseDirectory.Temp, recursive: true });
+      await mkdir(`${relPath}/files`, { dir: BaseDirectory.Temp, recursive: true });
+
+      // Write metadata.json
+      const metasToWrite = metas.map(m => ({ ...m }));
+      await writeFile({ path: `${relPath}/metadata.json`, contents: new TextEncoder().encode(JSON.stringify(metasToWrite)), dir: BaseDirectory.Temp });
+
+      // Write files one-by-one
+      for (const m of metasToWrite) {
+        const raw = await fileStore.getItem(m.id);
+        const bytes = toUint8(raw);
+        await writeFile({ path: `${relPath}/files/${m.id}.bin`, contents: bytes, dir: BaseDirectory.Temp });
+      }
+
+      const absSrc = `${tmpBase.replace(/\\\\/g,'/')}/${relPath}`; // tempDir + relative
+      const absDest = `${tmpBase.replace(/\\\\/g,'/')}/${relPath}.zip`;
+
+      // Call Rust to zip the directory (streams to disk)
+      const out = await invoke('zip_dir', { src: absSrc, dest: absDest });
+      showToast(`Exported archive: ${out}`, 'success', 6000);
+    } catch (e) {
+      console.error('Export archive failed', e);
+      showToast('Export failed. See console for details.', 'error');
+    }
+  }
+
+  // Import archive using Tauri-native unzip
+  async function importArchiveFromPath(zipPath) {
+    if (!isTauri()) {
+      showToast("Import archive is only available in the desktop app.", "info");
+      return;
+    }
+    try {
+      const { tempDir } = await import('@tauri-apps/api/path');
+      const { invoke } = await import('@tauri-apps/api/core');
+      const tmpBase = await tempDir();
+      const outDir = `${tmpBase}/empire-import-${Date.now()}`;
+      const res = await invoke('unzip_to_dir', { zip_path: zipPath, dest: outDir });
+      showToast(`Archive extracted to ${res}`, 'success');
+      // You can then read metadata.json and files from outDir using fs API or implement a follow-up importer.
+    } catch (e) {
+      console.error('Import archive failed', e);
+      showToast('Import failed. See console for details.', 'error');
     }
   }
 

@@ -1,0 +1,9 @@
+1. Make code changes
+2. Bump versions in package.json, tauri.conf.json, and Cargo.toml
+3. git add .
+4. git commit -m ""
+5. git push
+6. git tag -a v#.#.# -m "Release v#.#.#" 
+7. git push origin --tags
+8. Make sure desktop release github action started
+9. Check vercel to make sure website is running
