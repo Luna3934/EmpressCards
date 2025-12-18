@@ -73,6 +73,13 @@ const DEFAULT_COLLECTIONS = [
   "Samharian Ladies",
   "Celestial Foxfire",
   "Spicy Cat Princess",
+  "Magazine",
+  "Court Tokens",
+  "Obsidian Veil",
+  "Moonspire Minutes",
+  "The Blooming Crown",
+  "Phoenix Oath",
+  "Black Aurora Mandate",
 ];
 
 // Hoisted version — safe to use earlier in the file
@@ -115,6 +122,12 @@ const COLLECTION_DEFAULT_TIER_RAW = {
   "Jade Cat Private Garden" : "Jade",
   "Immortal Cat Imperial Court" : "Immortal",
   "Astral Testament" : "Sovereign",
+  "Court Tokens" : "Jade",
+  "Obsidian Veil" : "Empyreal",
+  "Moonspire Minutes" : "Scribe",
+  "The Blooming Crown" : "Lotus",
+  "Phoenix Oath" : "Phoenix",
+  "Black Aurora Mandate" : "Eclipse",
 };
 
 /** Build a normalized lookup so "  Celestial  Oath " works the same. */
@@ -140,6 +153,7 @@ const COLLECTION_DEFAULT_NSFW_RAW = {
   "Samharian Ladies": true,
   "Celestial Foxfire": true,
   "Spicy Cat Princess": true,
+  "Obsidian Veil": true,
 };
 
 /** Build a normalized lookup so "  Adult  Collection " works the same. */
